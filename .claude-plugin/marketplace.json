@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Tools for running a graph of coding agents (a lead and its workers) on herdr, for Claude Code, Codex, and Pi",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "pluginRoot": "./plugins"
   },
   "plugins": [

@@ -1,7 +1,7 @@
 {
   "name": "memgate",
   "description": "Keep parallel agents from exhausting machine memory: gate heavy launches, cap concurrent runs, and alert a coordinator agent (Linux and WSL)",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": {
     "name": "Yuki Masaki",
     "email": "97879070+yukimasaki@users.noreply.github.com"
