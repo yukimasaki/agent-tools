@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/yukimasaki/agent-tools/compare/v0.1.2...v0.1.3) (2026-10-08)
+
+
+### Bug Fixes
+
+* **memgate:** git worktree だけを開いているとき、本体と共用の Docker を残置の疑いにしない ([#8](https://github.com/yukimasaki/agent-tools/issues/8)) ([13c81a7](https://github.com/yukimasaki/agent-tools/commit/13c81a7e657a08c406b180c6afc8b65bc4b3a451))
+
 ## [0.1.2](https://github.com/yukimasaki/agent-tools/compare/v0.1.1...v0.1.2) (2026-10-08)
 
 
