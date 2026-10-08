@@ -3,6 +3,7 @@
 
 import argparse
 import dataclasses
+import datetime
 import fcntl
 import hashlib
 import json
@@ -230,6 +231,27 @@ def docker_memory(value):
     return float(match[1]) * scales[match[2]]
 
 
+def docker_details(names):
+    """Return {name: (age_seconds or None, auto_remove)} from one docker inspect call."""
+    details = {}
+    if not names:
+        return details
+    now = time.time()
+    out = sh(["docker", "inspect", "--format", "{{.Name}}\t{{.State.StartedAt}}\t{{.HostConfig.AutoRemove}}", *names])
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        name, started, auto_remove = parts[0].lstrip("/"), parts[1], parts[2] == "true"
+        age = None
+        match = re.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", started)
+        if match and not started.startswith("0001-"):
+            start = datetime.datetime.strptime(match[1], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+            age = max(0.0, now - start.timestamp())
+        details[name] = (age, auto_remove)
+    return details
+
+
 def analyze(cfg, with_docker_stats=False):
     # Finish slow Docker calls before sampling memory and workspace ownership.
     stats = {}
@@ -238,14 +260,24 @@ def analyze(cfg, with_docker_stats=False):
             parts = line.split("\t", 1)
             if len(parts) == 2:
                 stats[parts[0]] = docker_memory(parts[1])
-    docker = {}
+    docker, rows = {}, []
     for line in sh(["docker", "ps", "--format", '{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.RunningFor}}']).splitlines():
         name, project, since = (line.split("\t") + ["", ""])[:3]
+        if name:
+            rows.append((name, project, since))
+    details = docker_details([name for name, _, _ in rows])
+    for name, project, since in rows:
         project = project or name
         if name.startswith("supabase_"):
             project = re.sub(r"^supabase_(analytics|pooler|realtime|studio|db|storage|rest|kong|pg_meta|vector|auth|inbucket|edge_runtime|imgproxy)_", "", name)
-        if name not in cfg.docker_exclude and project not in cfg.docker_exclude:
-            docker.setdefault(project, []).append((name, since))
+        if name in cfg.docker_exclude or project in cfg.docker_exclude:
+            continue
+        # Unknown age counts as old. Young containers get the same grace as orphan
+        # processes; --rm containers clean up after themselves unless they linger.
+        age, auto_remove = details.get(name, (None, False))
+        if age is not None and (age < cfg.orphan_age_seconds or (auto_remove and age < cfg.idle_age_seconds)):
+            continue
+        docker.setdefault(project, []).append((name, since, age))
     avail, total, swap, psi = meminfo()
     lv = level(avail, psi, cfg)
     processes, ports = procs(), listening()
@@ -320,7 +352,14 @@ def analyze(cfg, with_docker_stats=False):
             suspects.append((f"dup:{ws}:{len(roots)}", "Multiple servers", "; ".join(f"pid={p['pid']} {p['rss']}MB" for p in roots), "Ask the workspace lead to review"))
     for project, items in docker.items():
         if project not in pane_repos:
-            mb = sum(stats.get(name, 0) for name, _ in items)
+            mb = sum(stats.get(name, 0) for name, _, _ in items)
+            if lv == "OK":
+                # With memory to spare, report only long-running projects, and only
+                # large ones once Docker stats are known.
+                if all(age is not None and age < cfg.idle_age_seconds for _, _, age in items):
+                    continue
+                if with_docker_stats and mb < cfg.min_rss_mb:
+                    continue
             suspects.append((f"docker:{project}", "Docker project without a pane", f"{project}: {len(items)} containers; {items[0][1]}; {mb:.0f}MB", "Check dependencies before stopping"))
     ignored = [re.compile(pattern) for pattern in cfg.ignore_patterns]
     suspects = [s for s in suspects if not any(pattern.search(s[0]) for pattern in ignored)
