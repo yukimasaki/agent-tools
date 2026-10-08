@@ -99,7 +99,7 @@ class MemgateTests(unittest.TestCase):
         self.assertIn("WARN below 5000MB", memgate.report(snapshot(), cfg))
 
     def collect(self, processes, available=3000, wsl=False, ports=None, workspaces=None,
-                panes=None, agents=None, docker="", stats="", cfg=None):
+                panes=None, agents=None, docker="", stats="", inspect="", cfg=None):
         workspaces = [{"workspace_id": "a", "label": "A"}, {"workspace_id": "b", "label": "B"}] if workspaces is None else workspaces
         panes = [{"workspace_id": "a", "cwd": "/srv/projects/demo"}] if panes is None else panes
         agents = [{"workspace_id": "a", "name": "lead-demo", "agent_status": "idle"}] if agents is None else agents
@@ -109,7 +109,7 @@ class MemgateTests(unittest.TestCase):
                     ("agent", "list"): {"agents": agents}}[args]
         def fake_sh(command, **kwargs):
             self.assertEqual(command[0], "docker")
-            return docker if command[1] == "ps" else stats
+            return {"ps": docker, "stats": stats, "inspect": inspect}[command[1]]
         with patch.object(memgate, "meminfo", return_value=(available, 8000, 0, 0)), \
              patch.object(memgate, "procs", return_value=copy.deepcopy(processes)), \
              patch.object(memgate, "listening", return_value=ports or {}), \
@@ -201,6 +201,35 @@ class MemgateTests(unittest.TestCase):
         self.assertEqual([s[0] for s in result["suspects"]], ["docker:other", "docker:example"])
         self.assertIn("1536MB", result["suspects"][0][2])
         self.assertEqual(memgate.docker_memory("512KiB / 1GiB"), 0.5)
+
+    def started(self, seconds_ago):
+        stamp = time.gmtime(time.time() - seconds_ago)
+        return time.strftime("%Y-%m-%dT%H:%M:%S", stamp) + ".123456789Z"
+
+    def test_docker_skips_young_and_short_lived_autoremove_containers(self):
+        docker = ("young\t\t15 seconds ago\nrm-short\t\t15 minutes ago\n"
+                  "rm-long\t\t2 hours ago\nold\t\t2 hours ago\nunknown\t\tan hour\n")
+        inspect = (f"/young\t{self.started(15)}\ttrue\n"
+                   f"/rm-short\t{self.started(900)}\ttrue\n"
+                   f"/rm-long\t{self.started(7200)}\ttrue\n"
+                   f"/old\t{self.started(7200)}\tfalse\n")
+        result = self.collect({}, docker=docker, inspect=inspect)
+        self.assertEqual(result["level"], "WARN")
+        self.assertEqual(sorted(s[0] for s in result["suspects"]), ["docker:old", "docker:rm-long", "docker:unknown"])
+        self.assertEqual(memgate.docker_details([]), {})
+
+    def test_docker_at_ok_reports_only_long_running_large_projects(self):
+        docker = "small\t\t2 hours\nlarge\t\t2 hours\nrecent\t\t20 minutes\n"
+        inspect = (f"/small\t{self.started(7200)}\tfalse\n"
+                   f"/large\t{self.started(7200)}\tfalse\n"
+                   f"/recent\t{self.started(1200)}\tfalse\n")
+        stats = "small\t20MiB / 1GiB\nlarge\t900MiB / 4GiB\nrecent\t900MiB / 4GiB\n"
+        result = self.collect({}, available=6000, docker=docker, inspect=inspect, stats=stats)
+        self.assertEqual(result["level"], "OK")
+        self.assertEqual([s[0] for s in result["suspects"]], ["docker:large"])
+        # Below the warning floor every old project is reported again.
+        result = self.collect({}, available=3000, docker=docker, inspect=inspect, stats=stats)
+        self.assertEqual(sorted(s[0] for s in result["suspects"]), ["docker:large", "docker:recent", "docker:small"])
 
     def test_missing_herdr_does_not_claim_workspaces_closed(self):
         with patch.object(memgate, "meminfo", return_value=(5000, 8000, 0, 0)), \
@@ -317,6 +346,8 @@ class MemgateTests(unittest.TestCase):
                 if stats_reads == 1:
                     change(state)
                 return "demo-db\t64MiB / 1GiB\n"
+            if command[1] == "inspect":
+                return ""
             self.assertEqual(command[1], "ps")
             return "demo-db\tdemo\tan hour\n"
         def fake_sleep(_):

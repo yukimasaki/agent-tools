@@ -92,6 +92,13 @@ and dependencies. Stop only workloads within the user's authorized scope;
 ask the workspace lead about servers awaiting human review. Protected ports,
 repositories, and services are excluded from these candidates.
 
+Docker candidates skip containers younger than `orphan_age_seconds` and
+auto-removed (`docker run --rm`) containers younger than `idle_age_seconds`,
+because these usually clean up after themselves. While the level is OK, a
+Docker project is reported only when it has run for at least
+`idle_age_seconds` and, once Docker stats are collected, uses at least
+`min_rss_mb`.
+
 The script never stops processes or containers. OOM score changes are disabled
 unless `oom_score_adj` is explicitly configured. An optional `oom_use_sudo`
 setting requests noninteractive `sudo choom` for protected processes. Use
