@@ -249,6 +249,28 @@ class MemgateTests(unittest.TestCase):
         result = self.collect({}, available=3000, docker=docker, inspect=inspect, stats=stats)
         self.assertEqual(sorted(s[0] for s in result["suspects"]), ["docker:large", "docker:recent", "docker:small"])
 
+    def test_main_repo_of_resolves_worktrees(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            main, worktree = Path(tmp) / "mainrepo", Path(tmp) / "mainrepo-12"
+            env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
+            for args in (["init", "-q", str(main)],
+                         ["-C", str(main), "commit", "-q", "--allow-empty", "-m", "init"],
+                         ["-C", str(main), "worktree", "add", "-q", "-b", "wt", str(worktree)]):
+                subprocess.run(["git", *args], check=True, env=env)
+            memgate.main_repo_of.cache_clear()
+            self.assertEqual(memgate.main_repo_of(str(worktree)), "mainrepo")
+            self.assertEqual(memgate.main_repo_of(str(main)), "mainrepo")
+            self.assertIsNone(memgate.main_repo_of(tmp))
+
+    def test_docker_of_main_repo_is_not_orphaned_by_worktree_panes(self):
+        panes = [{"workspace_id": "a", "cwd": "/srv/projects/mainrepo-12"}]
+        docker = "supabase_db_mainrepo\t\tan hour\nother-db\tother\tan hour\n"
+        with patch.object(memgate, "main_repo_of", side_effect=lambda cwd: "mainrepo" if cwd.endswith("-12") else None), \
+             patch.object(memgate.Path, "is_dir", return_value=True):
+            result = self.collect({}, panes=panes, docker=docker)
+        self.assertEqual([s[0] for s in result["suspects"]], ["docker:other"])
+
     def test_missing_herdr_does_not_claim_workspaces_closed(self):
         with patch.object(memgate, "meminfo", return_value=(5000, 8000, 0, 0)), \
              patch.object(memgate, "procs", return_value={10: process(ws="unknown")}), \
