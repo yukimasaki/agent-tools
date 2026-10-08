@@ -5,6 +5,7 @@ import argparse
 import dataclasses
 import datetime
 import fcntl
+import functools
 import hashlib
 import json
 import math
@@ -199,6 +200,16 @@ def listening():
     return ports
 
 
+@functools.lru_cache(maxsize=512)
+def main_repo_of(cwd):
+    """Name of the main repository directory for a cwd inside a git worktree."""
+    out = sh(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], timeout=5).strip()
+    if not out:
+        return None
+    common = Path(out)
+    return common.parent.name if common.name == ".git" else None
+
+
 def repo_of(cwd, cfg):
     if not cwd:
         return None
@@ -317,6 +328,12 @@ def analyze(cfg, with_docker_stats=False):
             if repo:
                 pane_repos.add(repo)
                 repo_ws.setdefault(repo, set()).add(ws)
+            # Worktrees share the main checkout's containers. Match Docker
+            # projects against the main repository too, but keep process
+            # attribution by the worktree's own directory.
+            main = main_repo_of(cwd) if Path(cwd).is_dir() else None
+            if main:
+                pane_repos.add(main)
     usage, suspects, servers = {}, [], {}
     heavy_pattern = re.compile(cfg.heavy_pattern)
     wsl = is_wsl()

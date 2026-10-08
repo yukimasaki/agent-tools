@@ -97,7 +97,9 @@ and dependencies. Stop only workloads within the user's authorized scope;
 ask the workspace lead about servers awaiting human review. Protected ports,
 repositories, and services are excluded from these candidates.
 
-Docker candidates skip containers younger than `orphan_age_seconds` and
+A Docker project matches a pane when its name equals the pane's repository
+directory or, for a git worktree, the main repository's directory, because
+worktrees usually share the main checkout's containers. Docker candidates skip containers younger than `orphan_age_seconds` and
 auto-removed (`docker run --rm`) containers younger than `idle_age_seconds`,
 because these usually clean up after themselves. While the level is OK, a
 Docker project is reported only when it has run for at least
