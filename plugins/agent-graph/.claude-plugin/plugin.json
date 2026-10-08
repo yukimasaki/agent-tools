@@ -1,7 +1,7 @@
 {
   "name": "agent-graph",
   "description": "Run a lead agent and its workers in herdr tabs: naming, lead promotion and handoff, a watcher that wakes the lead when a worker stops, PR and review helpers",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Yuki Masaki",
     "email": "97879070+yukimasaki@users.noreply.github.com"
