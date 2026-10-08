@@ -110,23 +110,38 @@ def meminfo():
     for line in Path("/proc/meminfo").read_text().splitlines():
         key, value = line.split(":", 1)
         data[key] = int(value.split()[0]) // 1024
-    psi = 0.0
+    psi = (0.0, 0.0)
     pressure = Path("/proc/pressure/memory")
     if pressure.exists():
         for line in pressure.read_text().splitlines():
             if line.startswith("some "):
-                psi = float(dict(item.split("=", 1) for item in line.split()[1:])["avg10"])
+                fields = dict(item.split("=", 1) for item in line.split()[1:])
+                psi = (float(fields["avg10"]), float(fields["avg60"]))
     return data["MemAvailable"], data["MemTotal"], data["SwapTotal"] - data["SwapFree"], psi
+
+
+def psi_pair(psi):
+    """Return (avg10, avg60); a single number stands for both."""
+    return tuple(psi) if isinstance(psi, (tuple, list)) else (psi, psi)
+
+
+def psi_high(avail, psi, cfg):
+    # Sustained pressure (avg60) always counts. A short avg10 spike counts only
+    # when available memory is already close to the warning floor: with plenty
+    # free, reclaim stalls (for example from page cache during large writes) mean
+    # slow, not about to freeze.
+    avg10, avg60 = psi_pair(psi)
+    return avg60 >= cfg.psi_threshold or (avg10 >= cfg.psi_threshold and avail < cfg.warn_mb * 1.5)
 
 
 def level(avail, psi, cfg):
     result = "OK" if avail >= cfg.warn_mb else "WARN" if avail >= cfg.critical_mb else "CRIT"
-    return "WARN" if result == "OK" and psi >= cfg.psi_threshold else result
+    return "WARN" if result == "OK" and psi_high(avail, psi, cfg) else result
 
 
 def can_launch(need, cfg):
     avail, _, _, psi = meminfo()
-    return avail - need >= cfg.critical_mb and psi < cfg.psi_threshold, avail, psi
+    return avail - need >= cfg.critical_mb and not psi_high(avail - need, psi, cfg), avail, psi
 
 
 def is_wsl():
@@ -370,8 +385,9 @@ def analyze(cfg, with_docker_stats=False):
 
 def report(result, cfg):
     lines = ["# memgate", "", f"Level: **{result['level']}** available={result['avail']}MB / {result['total']}MB "
-             f"swap_used={result['swap']}MB PSI some10={result['psi']}",
-             f"WARN below {cfg.warn_mb}MB; CRIT below {cfg.critical_mb}MB; PSI warning at {cfg.psi_threshold:g}.",
+             f"swap_used={result['swap']}MB PSI some10={psi_pair(result['psi'])[0]} some60={psi_pair(result['psi'])[1]}",
+             f"WARN below {cfg.warn_mb}MB; CRIT below {cfg.critical_mb}MB; PSI warning at {cfg.psi_threshold:g} "
+             f"(some60, or some10 below {cfg.warn_mb * 1.5:g}MB available).",
              "Docker memory is separate from process totals.", "", "## Memory by workspace"]
     for key, mb in sorted(result["usage"].items(), key=lambda item: -item[1])[:15]:
         name = f"{result['wss'][key]} [{key}] lead={result['leads'].get(key, '-')}" if key in result["wss"] else key

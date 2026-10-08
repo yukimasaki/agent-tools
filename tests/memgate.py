@@ -84,6 +84,24 @@ class MemgateTests(unittest.TestCase):
         self.assertEqual(cfg.protected_ports, [8456])
         self.assertIsNone(cfg.oom_score_adj)
 
+    def test_short_psi_spike_counts_only_near_the_warning_floor(self):
+        cfg = dataclasses.replace(self.cfg, warn_mb=5000, critical_mb=1000, psi_threshold=8)
+        # avg10 spike, avg60 calm, plenty available: slow but safe.
+        self.assertEqual(memgate.level(19000, (15.7, 2.0), cfg), "OK")
+        # The same spike counts once available is under 1.5x the warning floor.
+        self.assertEqual(memgate.level(7000, (15.7, 2.0), cfg), "WARN")
+        # Sustained pressure always counts.
+        self.assertEqual(memgate.level(19000, (2.0, 9.0), cfg), "WARN")
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            with patch.object(memgate, "meminfo", return_value=(19000, 40000, 0, (15.7, 2.0))):
+                self.assertEqual(memgate.gate(3000, cfg), 0)
+            # Projected availability below 1.5x the floor makes the spike count.
+            with patch.object(memgate, "meminfo", return_value=(9000, 40000, 0, (15.7, 2.0))):
+                self.assertEqual(memgate.gate(3000, cfg), 1)
+            with patch.object(memgate, "meminfo", return_value=(19000, 40000, 0, (2.0, 9.0))):
+                self.assertEqual(memgate.gate(3000, cfg), 1)
+        self.assertIn("PSI some10=15.7 some60=2.0", memgate.report(dict(snapshot(), psi=(15.7, 2.0)), cfg))
+
     def test_gate_boundary_and_configured_psi(self):
         cfg = dataclasses.replace(self.cfg, warn_mb=5000, critical_mb=1000, psi_threshold=4.5)
         with contextlib.redirect_stdout(io.StringIO()) as output:

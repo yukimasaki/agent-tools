@@ -34,7 +34,7 @@ Configuration is `$XDG_CONFIG_HOME/memgate/config.toml`, falling back to
 `~/.config/memgate/config.toml`. Start with [config.example.toml](config.example.toml)
 and choose thresholds, repository roots, and protections for the current machine.
 The example contains fictional values. Without a file, defaults are WARN below
-4096MB, CRIT below 2048MB, and PSI `some avg10` at 8. Reports display the actual
+4096MB, CRIT below 2048MB, and a PSI threshold of 8. Reports display the actual
 configuration. MB means binary MiB throughout the tool.
 
 State goes to `$XDG_STATE_HOME/memgate/`, falling back to
@@ -43,8 +43,13 @@ same state directory. Settings are loaded at startup; restart a loop after
 changing its configuration.
 
 - `gate <MB>` exits 0 when the projected available memory stays at or above
-  `critical_mb` and PSI is below `psi_threshold`. It exits 1 when launch should
-  wait, and 2 on invalid input or an unreadable memory snapshot. A gate checks
+  `critical_mb` and memory pressure is not high. Pressure is high when PSI
+  `some avg60` reaches `psi_threshold`, or when `some avg10` reaches it while
+  the projected available memory is below 1.5 × `warn_mb`. A short reclaim
+  spike with plenty of memory free (for example during a large file write)
+  does not refuse launches. The same rule raises the level to WARN. It exits
+  1 when launch should wait, and 2 on invalid input or an unreadable memory
+  snapshot. A gate checks
   current memory; it does not reserve memory for future launches.
 - `run` acquires a numbered lock, applies the same gate, then replaces itself
   with the command. It exits 75 without launching when `--wait` expires. It
