@@ -1,0 +1,29 @@
+# Fictional example. All fields are optional; choose values for your machine.
+# Memory values are binary MiB. PSI is the /proc/pressure/memory some avg10 value.
+warn_mb = 5120
+critical_mb = 2560
+psi_threshold = 7.5
+repo_roots = ["/srv/projects", "/srv/worktrees"]
+protected_ports = [8456]
+protected_repositories = ["demo-dashboard"]
+protected_services = ["demo-dashboard.service"]
+# Matches exact container names or compose project names.
+docker_exclude = ["example-proxy", "demo-cache"]
+# Regular expressions matched against suspect IDs (not process command lines).
+ignore_patterns = ['^docker:demo-retained$']
+
+# OOM adjustment is disabled by default. Uncomment only when explicitly wanted.
+# oom_score_adj = -500
+oom_use_sudo = false
+
+# Classification and polling policy. Defaults are documented by these options.
+min_rss_mb = 150
+orphan_age_seconds = 600
+idle_age_seconds = 1800
+duplicate_servers = 3
+loop_interval_seconds = 30
+reminder_seconds = 600
+run_need_mb = 2048
+run_wait_seconds = 300
+run_poll_seconds = 5
+# Optional: heavy_pattern = '^(node|bun|python3|chromium)$'

@@ -1,0 +1,13 @@
+{
+  "name": "agent-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tools for running a graph of coding agents on herdr (Pi package manifest)",
+  "license": "MIT",
+  "repository": "https://github.com/yukimasaki/agent-tools",
+  "pi": {
+    "skills": [
+      "./plugins/agent-graph/skills/agent-graph"
+    ]
+  }
+}

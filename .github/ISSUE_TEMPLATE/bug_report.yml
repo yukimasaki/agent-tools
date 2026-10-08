@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a problem with a skill or the marketplace.
+labels: [bug]
+body:
+  - type: dropdown
+    id: target
+    attributes:
+      label: Affected component
+      options:
+        - agent-graph
+        - memgate
+        - marketplace / packaging
+        - other (describe in the body)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Agent harness
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Pi
+        - other (describe in the body)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: agent-tools version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: herdr and harness versions
+      description: e.g. output of `herdr --version` and `claude --version` / `codex --version` / `pi --version`
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Ubuntu 24.04 / WSL2 (Ubuntu 24.04) / macOS 15"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant logs (e.g. the watcher log under `~/.local/state/agent-graph/<workspace>/`). Remove anything private.
+      render: text

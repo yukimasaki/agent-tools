@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest an improvement to a skill.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: target
+    attributes:
+      label: Component
+      options:
+        - agent-graph
+        - memgate
+        - marketplace / packaging
+        - new skill
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What went wrong or what was hard in practice? Concrete incidents help — tools are added after a problem has been seen more than once.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true

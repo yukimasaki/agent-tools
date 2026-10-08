@@ -1,0 +1,537 @@
+#!/usr/bin/env python3
+"""Memory gates, concurrency slots, and herdr notifications for Linux and WSL."""
+
+import argparse
+import dataclasses
+import fcntl
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+import tomllib
+
+
+@dataclasses.dataclass
+class Config:
+    warn_mb: int = 4096
+    critical_mb: int = 2048
+    psi_threshold: float = 8.0
+    repo_roots: list = dataclasses.field(default_factory=list)
+    protected_ports: list = dataclasses.field(default_factory=list)
+    protected_repositories: list = dataclasses.field(default_factory=list)
+    protected_services: list = dataclasses.field(default_factory=list)
+    docker_exclude: list = dataclasses.field(default_factory=list)
+    ignore_patterns: list = dataclasses.field(default_factory=list)
+    oom_score_adj: int | None = None
+    oom_use_sudo: bool = False
+    heavy_pattern: str = r"^(node|MainThread|next-server.*|chrome|chromium|headless_shell|workerd|playwright|vitest|python3?|uvicorn|bun|esbuild|vite)$"
+    min_rss_mb: int = 150
+    orphan_age_seconds: int = 600
+    idle_age_seconds: int = 1800
+    duplicate_servers: int = 3
+    loop_interval_seconds: float = 30.0
+    reminder_seconds: float = 600.0
+    run_need_mb: int = 2048
+    run_wait_seconds: float = 300.0
+    run_poll_seconds: float = 5.0
+
+
+def config_path():
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "memgate/config.toml"
+
+
+def state_path():
+    return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "memgate"
+
+
+def load_config():
+    path = config_path()
+    data = tomllib.loads(path.read_text()) if path.exists() else {}
+    defaults = Config()
+    fields = {f.name for f in dataclasses.fields(Config)}
+    if data.keys() - fields:
+        raise ValueError("Unknown configuration keys: " + ", ".join(sorted(data.keys() - fields)))
+    for key, value in data.items():
+        expected = getattr(defaults, key)
+        if key == "oom_score_adj":
+            valid = type(value) is int and -1000 <= value <= 1000
+        elif isinstance(expected, list):
+            item_type = int if key == "protected_ports" else str
+            valid = isinstance(value, list) and all(type(v) is item_type for v in value)
+        elif type(expected) is float:
+            valid = type(value) in (int, float) and math.isfinite(value)
+        else:
+            valid = type(value) is type(expected)
+        if not valid:
+            raise ValueError(f"Invalid configuration value: {key}")
+    cfg = Config(**data)
+    if not 0 < cfg.critical_mb <= cfg.warn_mb:
+        raise ValueError("Require 0 < critical_mb <= warn_mb")
+    for key in ("psi_threshold", "min_rss_mb", "orphan_age_seconds", "idle_age_seconds",
+                "duplicate_servers", "loop_interval_seconds", "reminder_seconds", "run_poll_seconds"):
+        if getattr(cfg, key) <= 0:
+            raise ValueError(f"{key} must be positive")
+    if cfg.run_need_mb < 0 or cfg.run_wait_seconds < 0:
+        raise ValueError("run_need_mb and run_wait_seconds must be nonnegative")
+    if any(not 1 <= p <= 65535 for p in cfg.protected_ports):
+        raise ValueError("protected_ports must contain TCP port numbers")
+    if any(not Path(p).expanduser().is_absolute() for p in cfg.repo_roots):
+        raise ValueError("repo_roots must contain absolute paths")
+    re.compile(cfg.heavy_pattern)
+    for pattern in cfg.ignore_patterns:
+        re.compile(pattern)
+    return cfg
+
+
+def sh(cmd, timeout=20):
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return result.stdout if result.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def herdr(*args):
+    try:
+        result = json.loads(sh(["herdr", *args])).get("result", {})
+        return result if isinstance(result, dict) else {}
+    except (ValueError, AttributeError):
+        return {}
+
+
+def meminfo():
+    data = {}
+    for line in Path("/proc/meminfo").read_text().splitlines():
+        key, value = line.split(":", 1)
+        data[key] = int(value.split()[0]) // 1024
+    psi = 0.0
+    pressure = Path("/proc/pressure/memory")
+    if pressure.exists():
+        for line in pressure.read_text().splitlines():
+            if line.startswith("some "):
+                psi = float(dict(item.split("=", 1) for item in line.split()[1:])["avg10"])
+    return data["MemAvailable"], data["MemTotal"], data["SwapTotal"] - data["SwapFree"], psi
+
+
+def level(avail, psi, cfg):
+    result = "OK" if avail >= cfg.warn_mb else "WARN" if avail >= cfg.critical_mb else "CRIT"
+    return "WARN" if result == "OK" and psi >= cfg.psi_threshold else result
+
+
+def can_launch(need, cfg):
+    avail, _, _, psi = meminfo()
+    return avail - need >= cfg.critical_mb and psi < cfg.psi_threshold, avail, psi
+
+
+def is_wsl():
+    return "microsoft" in Path("/proc/sys/kernel/osrelease").read_text().lower()
+
+
+def procs():
+    uptime = float(Path("/proc/uptime").read_text().split()[0])
+    clock_ticks = os.sysconf("SC_CLK_TCK")
+    page_size = os.sysconf("SC_PAGE_SIZE")
+    out = {}
+    for path in Path("/proc").iterdir():
+        if not path.name.isdigit():
+            continue
+        try:
+            stat = (path / "stat").read_text()
+            comm = stat[stat.index("(") + 1:stat.rindex(")")]
+            fields = stat[stat.rindex(")") + 2:].split()
+            rss = int((path / "statm").read_text().split()[1]) * page_size // (1024 * 1024)
+            process = dict(pid=int(path.name), comm=comm, ppid=int(fields[1]), rss=rss,
+                           age=int(uptime - int(fields[19]) / clock_ticks),
+                           args=(path / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip(),
+                           ws=None, pane=None, cwd="", cg="")
+            for key, getter in (
+                ("cwd", lambda: os.readlink(path / "cwd")),
+                ("cg", lambda: (path / "cgroup").read_text()),
+            ):
+                try:
+                    process[key] = getter()
+                except OSError:
+                    pass
+            try:
+                env = dict(e.split(b"=", 1) for e in (path / "environ").read_bytes().split(b"\0") if b"=" in e)
+                for key, name in (("ws", b"HERDR_WORKSPACE_ID"), ("pane", b"HERDR_PANE_ID")):
+                    if name in env:
+                        process[key] = env[name].decode(errors="replace")
+            except OSError:
+                pass
+            out[process["pid"]] = process
+        except (OSError, ValueError, IndexError):
+            continue
+    return out
+
+
+def listening():
+    ports = {}
+    for line in sh(["ss", "-ltnpH"]).splitlines():
+        cols = line.split()
+        if len(cols) < 5:
+            continue
+        port = cols[3].rsplit(":", 1)[-1]
+        if port.isdigit():
+            for pid in re.findall(r"pid=(\d+)", " ".join(cols[5:])):
+                ports.setdefault(int(pid), set()).add(int(port))
+    return ports
+
+
+def repo_of(cwd, cfg):
+    if not cwd:
+        return None
+    path = Path(cwd)
+    for root in cfg.repo_roots:
+        try:
+            relative = path.relative_to(Path(root).expanduser())
+            if relative.parts:
+                return relative.parts[0]
+        except ValueError:
+            pass
+    for parent in (path, *path.parents):
+        if (parent / ".git").exists():
+            return parent.name
+    return None
+
+
+def protected(process, ports, cfg):
+    return bool(set(ports.get(process["pid"], ())) & set(cfg.protected_ports)
+                or repo_of(process["cwd"], cfg) in cfg.protected_repositories
+                or any(service in process["cg"].strip().split("/") for service in cfg.protected_services))
+
+
+def adjust_oom(process, cfg):
+    if cfg.oom_score_adj is None:
+        return
+    path = Path(f"/proc/{process['pid']}/oom_score_adj")
+    try:
+        if path.read_text().strip() == str(cfg.oom_score_adj):
+            return
+        if cfg.oom_use_sudo:
+            sh(["sudo", "-n", "choom", "-n", str(cfg.oom_score_adj), "-p", str(process["pid"])])
+        else:
+            path.write_text(str(cfg.oom_score_adj))
+    except OSError:
+        pass
+
+
+def docker_memory(value):
+    match = re.match(r"\s*([\d.]+)\s*(B|KiB|MiB|GiB|kB|MB|GB)\b", value)
+    if not match:
+        return 0
+    scales = {"B": 1 / (1024 * 1024), "KiB": 1 / 1024, "MiB": 1, "GiB": 1024,
+              "kB": 1000 / (1024 * 1024), "MB": 1000000 / (1024 * 1024), "GB": 1000000000 / (1024 * 1024)}
+    return float(match[1]) * scales[match[2]]
+
+
+def analyze(cfg, with_docker_stats=False):
+    # Finish slow Docker calls before sampling memory and workspace ownership.
+    stats = {}
+    if with_docker_stats:
+        for line in sh(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.MemUsage}}"], timeout=60).splitlines():
+            parts = line.split("\t", 1)
+            if len(parts) == 2:
+                stats[parts[0]] = docker_memory(parts[1])
+    docker = {}
+    for line in sh(["docker", "ps", "--format", '{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.RunningFor}}']).splitlines():
+        name, project, since = (line.split("\t") + ["", ""])[:3]
+        project = project or name
+        if name.startswith("supabase_"):
+            project = re.sub(r"^supabase_(analytics|pooler|realtime|studio|db|storage|rest|kong|pg_meta|vector|auth|inbucket|edge_runtime|imgproxy)_", "", name)
+        if name not in cfg.docker_exclude and project not in cfg.docker_exclude:
+            docker.setdefault(project, []).append((name, since))
+    avail, total, swap, psi = meminfo()
+    lv = level(avail, psi, cfg)
+    processes, ports = procs(), listening()
+    workspace_result = herdr("workspace", "list")
+    workspaces = {w["workspace_id"]: w.get("label", w["workspace_id"]) for w in workspace_result.get("workspaces", [])}
+    agents = herdr("agent", "list").get("agents", [])
+    panes = herdr("pane", "list").get("panes", [])
+    busy, leads, pane_repos, repo_ws, cwd_ws = {}, {}, set(), {}, {}
+    for agent in agents:
+        ws = agent["workspace_id"]
+        busy[ws] = busy.get(ws, False) or agent.get("agent_status") in ("working", "blocked")
+        if agent.get("name", "").startswith("lead-"):
+            leads.setdefault(ws, set()).add(agent["name"])
+    leads = {ws: ",".join(sorted(names)) for ws, names in leads.items()}
+    for entry in [*agents, *panes]:
+        for cwd in (entry.get("cwd"), entry.get("foreground_cwd")):
+            if not cwd:
+                continue
+            ws = entry["workspace_id"]
+            cwd_ws.setdefault(cwd, set()).add(ws)
+            repo = repo_of(cwd, cfg)
+            if repo:
+                pane_repos.add(repo)
+                repo_ws.setdefault(repo, set()).add(ws)
+    usage, suspects, servers = {}, [], {}
+    heavy_pattern = re.compile(cfg.heavy_pattern)
+    wsl = is_wsl()
+    for process in processes.values():
+        # A unique cwd owner wins over inherited workspace environment variables.
+        cwd = Path(process["cwd"]) if process["cwd"] else None
+        candidates = set()
+        if cwd:
+            matching = [(len(Path(p).parts), owners) for p, owners in cwd_ws.items()
+                        if cwd == Path(p) or Path(p) in cwd.parents]
+            if matching:
+                depth = max(size for size, _ in matching)
+                candidates = set().union(*(owners for size, owners in matching if size == depth))
+        if not candidates:
+            candidates = repo_ws.get(repo_of(process["cwd"], cfg), set())
+        if len(candidates) == 1:
+            process["ws"] = next(iter(candidates))
+        key = process["ws"] if process["ws"] in workspaces else "outside: " + (repo_of(process["cwd"], cfg) or "other")
+        usage[key] = usage.get(key, 0) + process["rss"]
+        if protected(process, ports, cfg):
+            adjust_oom(process, cfg)
+            continue
+        if not heavy_pattern.match(process["comm"]) or (process["rss"] < cfg.min_rss_mb and process["pid"] not in ports):
+            continue
+        ancestors, parent_pid = [], process["ppid"]
+        while parent_pid in processes and len(ancestors) < 30:
+            ancestors.append(processes[parent_pid])
+            parent_pid = processes[parent_pid]["ppid"]
+        if any("mcp" in parent["args"].lower() for parent in ancestors[:4]):
+            continue
+        desc = (f"pid={process['pid']} {process['comm']} {process['rss']}MB age={process['age']//60}min "
+                f"cwd={process['cwd']} ports={sorted(ports.get(process['pid'], []))} args={process['args'][:140]}")
+        service = ".service" in process["cg"] and "session-" not in process["cg"] and "init.scope" not in process["cg"]
+        parent = processes.get(process["ppid"], {})
+        if "workspaces" in workspace_result and process["ws"] and process["ws"] not in workspaces:
+            suspects.append((f"closedws:{process['pid']}", "Closed workspace", desc, "Verify ownership before stopping"))
+        elif wsl and parent.get("comm") == "init" and not service and process["age"] > cfg.orphan_age_seconds:
+            suspects.append((f"orphan:{process['pid']}", "WSL orphan", desc, "Verify ownership before stopping"))
+        elif process["ws"] in workspaces and process["pid"] in ports:
+            servers.setdefault(process["ws"], []).append(process)
+            if not busy.get(process["ws"]) and process["age"] > cfg.idle_age_seconds and process["rss"] >= cfg.min_rss_mb:
+                suspects.append((f"idle:{process['pid']}", "Possibly idle server", desc,
+                                 f"Ask the workspace lead ({leads.get(process['ws'], 'none')})"))
+    for ws, items in servers.items():
+        pids = {p["pid"] for p in items}
+        roots = [p for p in items if p["ppid"] not in pids]
+        if len(roots) >= cfg.duplicate_servers:
+            suspects.append((f"dup:{ws}:{len(roots)}", "Multiple servers", "; ".join(f"pid={p['pid']} {p['rss']}MB" for p in roots), "Ask the workspace lead to review"))
+    for project, items in docker.items():
+        if project not in pane_repos:
+            mb = sum(stats.get(name, 0) for name, _ in items)
+            suspects.append((f"docker:{project}", "Docker project without a pane", f"{project}: {len(items)} containers; {items[0][1]}; {mb:.0f}MB", "Check dependencies before stopping"))
+    ignored = [re.compile(pattern) for pattern in cfg.ignore_patterns]
+    suspects = [s for s in suspects if not any(pattern.search(s[0]) for pattern in ignored)
+                and (lv != "OK" or not s[0].startswith(("idle:", "dup:")))]
+    return dict(level=lv, avail=avail, total=total, swap=swap, psi=psi, usage=usage,
+                wss=workspaces, leads=leads, suspects=suspects)
+
+
+def report(result, cfg):
+    lines = ["# memgate", "", f"Level: **{result['level']}** available={result['avail']}MB / {result['total']}MB "
+             f"swap_used={result['swap']}MB PSI some10={result['psi']}",
+             f"WARN below {cfg.warn_mb}MB; CRIT below {cfg.critical_mb}MB; PSI warning at {cfg.psi_threshold:g}.",
+             "Docker memory is separate from process totals.", "", "## Memory by workspace"]
+    for key, mb in sorted(result["usage"].items(), key=lambda item: -item[1])[:15]:
+        name = f"{result['wss'][key]} [{key}] lead={result['leads'].get(key, '-')}" if key in result["wss"] else key
+        lines.append(f"- {mb}MB {name}")
+    lines += ["", "## Processes and containers to review"]
+    lines += [f"- [{key}] {kind}: {desc} -> {action}" for key, kind, desc, action in result["suspects"]] or ["- None"]
+    return "\n".join(lines) + "\n"
+
+
+def gate(need, cfg):
+    allowed, avail, psi = can_launch(need, cfg)
+    print(f"available={avail}MB projected={avail - need}MB level={level(avail, psi, cfg)} "
+          f"critical_floor={cfg.critical_mb}MB psi_limit={cfg.psi_threshold:g} -> "
+          + ("OK: launch allowed" if allowed else "NG: reclaim unused resources and retry"))
+    return 0 if allowed else 1
+
+
+def notification_key(result):
+    return hashlib.sha256((result["level"] + "|" + "|".join(sorted(s[0] for s in result["suspects"]))).encode()).hexdigest()
+
+
+def should_notify(result, last_key, last_level, last_sent, now, cfg):
+    noteworthy = bool(result["suspects"]) or result["level"] != last_level
+    changed = notification_key(result) != last_key and noteworthy
+    remind = result["level"] != "OK" and last_sent is not None and now - last_sent >= cfg.reminder_seconds
+    return changed or remind
+
+
+def loop(agent, cfg):
+    state = state_path()
+    state.mkdir(parents=True, exist_ok=True)
+    with (state / "loop.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("A memgate loop is already running in this state directory")
+            return 0
+        pidfile = state / "loop.pid"
+        pidfile.write_text(str(os.getpid()))
+        last_key, last_level, last_sent = None, "OK", None
+        try:
+            while True:
+                try:
+                    result = analyze(cfg)
+                    (state / "status.md").write_text(report(result, cfg))
+                    if should_notify(result, last_key, last_level, last_sent, time.monotonic(), cfg):
+                        target = next((a for a in herdr("agent", "list").get("agents", []) if a.get("name") == agent), None)
+                        if target and target.get("agent_status") in ("idle", "done"):
+                            # Refresh both the decision and its key after slow Docker collection.
+                            result = analyze(cfg, with_docker_stats=True)
+                            (state / "status.md").write_text(report(result, cfg))
+                            now = time.monotonic()
+                            if should_notify(result, last_key, last_level, last_sent, now, cfg):
+                                target = next((a for a in herdr("agent", "list").get("agents", []) if a.get("name") == agent), None)
+                                if target and target.get("agent_status") in ("idle", "done"):
+                                    event = state / f"event-{time.time_ns()}.md"
+                                    event.write_text(report(result, cfg))
+                                    sent = herdr("agent", "prompt", agent,
+                                                 f"[memgate] level={result['level']} available={result['avail']}MB "
+                                                 f"suspects={len(result['suspects'])}. Read and review: {event}")
+                                    if sent.get("success") is not False and sent:
+                                        last_key, last_level, last_sent = notification_key(result), result["level"], now
+                except Exception as exc:
+                    (state / "loop.err").write_text(repr(exc))
+                time.sleep(cfg.loop_interval_seconds)
+        finally:
+            pidfile.unlink(missing_ok=True)
+
+
+def slots_status(name=None):
+    out = []
+    base = state_path() / "slots"
+    for directory in sorted(base.glob("*")):
+        if not directory.is_dir() or (name and name != directory.name):
+            continue
+        for path in sorted(directory.glob("*.lock"), key=lambda p: int(p.stem)):
+            with path.open("r+") as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                    out.append(f"{directory.name}/{path.stem}: free")
+                except BlockingIOError:
+                    try:
+                        holder = json.loads(path.with_suffix(".json").read_text())
+                    except (OSError, ValueError):
+                        holder = {}
+                    out.append(f"{directory.name}/{path.stem}: busy pid={holder.get('pid')} "
+                               f"ws={holder.get('ws')} cwd={holder.get('cwd')} cmd={holder.get('cmd', '')[:100]}")
+    return out
+
+
+def run(argv, cfg):
+    parser = argparse.ArgumentParser(prog="memgate run")
+    parser.add_argument("--slot", required=True)
+    parser.add_argument("--max", type=int, required=True)
+    parser.add_argument("--need", type=int, default=cfg.run_need_mb)
+    parser.add_argument("--wait", type=float, default=cfg.run_wait_seconds)
+    if "--" not in argv:
+        parser.error("Use -- before the command")
+    split = argv.index("--")
+    options, command = parser.parse_args(argv[:split]), argv[split + 1:]
+    if (not command or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", options.slot)
+            or options.max <= 0 or options.need < 0 or not math.isfinite(options.wait) or options.wait < 0):
+        parser.error("Require a command, a safe slot name, positive --max, and nonnegative --need/--wait")
+    directory = state_path() / "slots" / options.slot
+    directory.mkdir(parents=True, exist_ok=True)
+    # Fix one limit per slot group: conflicting callers must never enlarge it.
+    with (directory / "settings").open("a+") as settings:
+        fcntl.flock(settings, fcntl.LOCK_EX)
+        settings.seek(0)
+        old_limit = settings.read().strip()
+        if old_limit and int(old_limit) != options.max:
+            print(f"Slot {options.slot} already has max={old_limit}; use a different group name", file=sys.stderr)
+            return 2
+        if not old_limit:
+            settings.write(str(options.max))
+            settings.flush()
+    deadline, fd, mine, said = time.monotonic() + options.wait, None, None, None
+    try:
+        while True:
+            if fd is None:
+                for index in range(options.max):
+                    path = directory / f"{index}.lock"
+                    candidate = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+                    try:
+                        fcntl.flock(candidate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        fd, mine = candidate, path
+                        break
+                    except BlockingIOError:
+                        os.close(candidate)
+            if fd is not None:
+                allowed, avail, _ = can_launch(options.need, cfg)
+                if allowed:
+                    break
+                why = f"Insufficient memory: available={avail}MB need={options.need}MB"
+            else:
+                why = f"Slot {options.slot} is full (max={options.max})"
+            now = time.monotonic()
+            if now >= deadline:
+                print(f"[memgate run] Timed out: {why}. Command was not started", file=sys.stderr)
+                return 75
+            if said is None or now - said >= 60:
+                print(f"[memgate run] Waiting: {why}", file=sys.stderr, flush=True)
+                said = now
+            time.sleep(min(cfg.run_poll_seconds, deadline - now))
+        mine.with_suffix(".json").write_text(json.dumps(dict(pid=os.getpid(), start=time.time(),
+            cwd=os.getcwd(), ws=os.environ.get("HERDR_WORKSPACE_ID"), cmd=" ".join(command))))
+        os.set_inheritable(fd, True)
+        print(f"[memgate run] Acquired {options.slot}/{mine.stem}: {' '.join(command)}", file=sys.stderr, flush=True)
+        try:
+            os.execvp(command[0], command)
+        except FileNotFoundError:
+            print(f"Command not found: {command[0]}", file=sys.stderr)
+            return 127
+        except PermissionError:
+            print(f"Command cannot be executed: {command[0]}", file=sys.stderr)
+            return 126
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def main():
+    if not sys.platform.startswith("linux"):
+        print("memgate supports Linux and WSL only", file=sys.stderr)
+        return 2
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("status")
+    gate_parser = commands.add_parser("gate")
+    gate_parser.add_argument("need_mb", type=int)
+    commands.add_parser("slots")
+    loop_parser = commands.add_parser("loop")
+    loop_parser.add_argument("agent")
+    # run parses its own options around the command separator.
+    commands.add_parser("run", add_help=False)
+    argv = sys.argv[1:] or ["status"]
+    try:
+        cfg = load_config()
+        if argv[0] == "run":
+            return run(argv[1:], cfg)
+        args = parser.parse_args(argv)
+        if args.command == "gate":
+            if args.need_mb < 0:
+                parser.error("need_mb must be nonnegative")
+            return gate(args.need_mb, cfg)
+        if args.command == "status":
+            print(report(analyze(cfg, with_docker_stats=True), cfg), end="")
+        elif args.command == "slots":
+            print("\n".join(slots_status()) or "No slots")
+        elif args.command == "loop":
+            return loop(args.agent, cfg)
+        return 0
+    except (OSError, ValueError, re.error) as exc:
+        print(f"memgate: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,24 @@
+{
+  "name": "agent-tools",
+  "owner": {
+    "name": "Yuki Masaki",
+    "email": "97879070+yukimasaki@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "Tools for running a graph of coding agents (a lead and its workers) on herdr, for Claude Code, Codex, and Pi",
+    "version": "0.1.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "agent-graph",
+      "source": "./plugins/agent-graph",
+      "description": "Run a lead agent and its workers in herdr tabs: naming, lead promotion and handoff, a watcher that wakes the lead when a worker stops, PR and review helpers"
+    },
+    {
+      "name": "memgate",
+      "source": "./plugins/memgate",
+      "description": "Keep parallel agents from exhausting machine memory: gate heavy launches, cap concurrent runs, and alert a coordinator agent (Linux and WSL)"
+    }
+  ]
+}
