@@ -1,6 +1,6 @@
 {
   "name": "agent-tools",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Tools for running a graph of coding agents on herdr (Pi package manifest)",
   "license": "MIT",
