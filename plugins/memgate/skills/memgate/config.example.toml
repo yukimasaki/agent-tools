@@ -27,3 +27,12 @@ run_need_mb = 2048
 run_wait_seconds = 300
 run_poll_seconds = 5
 # Optional: heavy_pattern = '^(node|bun|python3|chromium)$'
+
+# Optional loop features; both are off by default. See SKILL.md.
+brief_leads = false
+notify_new_workers = false
+seed_on_first_run = true
+roster_batch_seconds = 120
+# Required when brief_leads = true. One line; {rules_file} becomes the path below.
+# rules_file = "/srv/shared/memory-rules.md"
+# brief_message = "Shared memory rules for this machine; please copy them into worker briefs: {rules_file}"

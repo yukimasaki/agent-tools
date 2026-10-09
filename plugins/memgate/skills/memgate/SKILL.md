@@ -66,12 +66,63 @@ changing its configuration.
   Notifications retry while the agent is busy and discard conditions that
   resolve before delivery. A recovery from a previously delivered warning is
   reported. Persistent warnings repeat after `reminder_seconds`.
+  It can also brief new workspace leads and report new workers; see "Lead briefing and new-worker notices".
 
 The collector prefers a unique cwd owner over inherited `HERDR_WORKSPACE_ID`.
 It detects repositories under configured `repo_roots`, or by walking up to a
 `.git` directory or worktree file. Ambiguous cwd ownership retains the inherited
 workspace. `ss` may hide processes owned by other users without sufficient
 permissions; the script does not request elevated permissions by default.
+
+## Lead briefing and new-worker notices
+
+Both features are off by default. Enable them in the configuration of the
+machine that runs `loop`, then restart the loop.
+
+- `brief_leads = true` sends `brief_message` once to each new workspace lead,
+  replacing `{rules_file}` with the absolute `rules_file` path. Keep the message
+  on one line and put the details in the rules file. The loop refuses to start
+  when the message is missing or spans lines, or when the rules file does not
+  exist. `gate`, `run`, and `status` ignore these checks.
+- `notify_new_workers = true` lists new non-lead agents in the coordinator's
+  notifications: name or pane ID, workspace, its lead, agent kind, and cwd.
+  memgate never messages the workers or their leads.
+
+A lead is an agent named `lead-<...>`, except temporary handoff names ending in
+`-next` and retired leads ending in `-g<number>`. In a workspace without any
+`lead-` agent, a single agent counts as the lead and is addressed by its name,
+or by pane ID when unnamed. Every other agent not named `lead-` is a worker.
+The coordinator's own workspace is skipped, and nothing is recorded while the
+coordinator is missing or herdr cannot be read.
+
+A briefing waits until the lead is idle or done, is not launching, and its
+last 15 screen lines show no question or permission prompt (`Esc to cancel`,
+`Enter to select`, `Enter to confirm`, `Do you want to proceed`, or a numbered
+`❯` option). Deferred or failed briefings are retried every round and recorded
+only after delivery. A draft typed into the lead's input cannot be detected.
+
+`roster.json` in the state directory records briefed leads by agent name (pane
+ID when unnamed), together with their pane, and known workers by pane ID. It
+also remembers which panes were recognized as leads, separately from whether
+they were briefed: a lead that could not be briefed yet stays a lead, and is
+retried, even after more agents join its workspace.
+Records for closed workspaces are removed, so a lead name that appears again
+later is briefed again. A lead renamed in the same pane keeps its record and is
+not briefed again. A lead with a recorded name in a different pane, such as a
+successor that takes the name after a handoff, is briefed again once. With
+`seed_on_first_run` (default true), the first round of each feature records the
+current agents without sending anything. A damaged ledger, including one
+with missing or mistyped fields, is copied to `roster.json.corrupt` and rebuilt
+without sending; the damaged file stays in place until the rebuilt ledger is
+saved, so an interrupted rebuild is rebuilt silently again. The loop reads the
+ledger again every round.
+
+Briefed leads and new workers wait in the ledger. They are added to the next
+memory notification, or sent on their own once the oldest has waited
+`roster_batch_seconds`. A roster is sent only while the coordinator is idle or
+done, is not launching, and passes the same screen check as a lead; otherwise it
+waits in the ledger for the next round. If the roster text cannot be built, memory
+notifications are still sent without it.
 
 ## Agreement for workspace leads
 

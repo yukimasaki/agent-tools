@@ -58,7 +58,7 @@ Each skill records the agents it has been verified with in its `SKILL.md` frontm
 
 | Skill | Verified on | What it does |
 |---|---|---|
-| `memgate` | Claude Code | `gate` before heavy launches, `run` with a concurrency slot, `status`, and a `loop` that alerts a coordinator agent when memory runs low |
+| `memgate` | Claude Code | `gate` before heavy launches, `run` with a concurrency slot, `status`, and a `loop` that alerts a coordinator agent when memory runs low and, when enabled, briefs new workspace leads and reports new workers |
 
 ## Configuration
 
