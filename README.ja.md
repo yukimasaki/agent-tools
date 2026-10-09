@@ -58,7 +58,7 @@ Pi は `package.json` の `pi.skills` に列挙したスキル（Pi で動作を
 
 | スキル | 確認済み | 内容 |
 |---|---|---|
-| `memgate` | Claude Code | 重い起動の前の `gate`、同時実行の枠を取る `run`、`status`、メモリが減ったら調整役のエージェントに知らせる `loop` |
+| `memgate` | Claude Code | 重い起動の前の `gate`、同時実行の枠を取る `run`、`status`、メモリが減ったら調整役のエージェントに知らせる `loop`（設定で有効にすると、新しい lead への取り決めの送付と、新しい作業役の報告も行う） |
 
 ## 設定
 
