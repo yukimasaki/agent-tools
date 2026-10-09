@@ -518,17 +518,47 @@ def roster_snapshot():
 
 
 def empty_roster():
-    return dict(version=1, seeded=[], leads={}, workers={}, pending=[])
+    return dict(version=1, seeded=[], leads={}, workers={}, identified={}, pending=[])
+
+
+def _text(value, optional=False):
+    return isinstance(value, str) or (optional and value is None)
+
+
+def _number(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def _valid_record(section, rec):
+    if not isinstance(rec, dict) or not _text(rec.get("workspace_id")):
+        return False
+    if section == "leads":
+        return _text(rec.get("pane_id")) and _number(rec.get("briefed_at")) and type(rec.get("seeded")) is bool
+    if section == "workers":
+        return _text(rec.get("name"), True) and _number(rec.get("seen_at"))
+    return _text(rec.get("key"))
+
+
+def _valid_pending(item):
+    if not (isinstance(item, dict) and _text(item.get("key")) and _text(item.get("workspace_id"))
+            and _text(item.get("pane_id")) and _number(item.get("queued_at"))
+            and _text(item.get("name"), True) and _text(item.get("workspace_label"), True)):
+        return False
+    if item.get("kind") == "briefed":
+        return True
+    return (item.get("kind") == "worker" and _text(item.get("lead")) and _text(item.get("kind_of_agent"), True)
+            and _text(item.get("cwd"), True))
 
 
 def valid_roster(data):
-    return (isinstance(data, dict) and data.get("version") == 1
-            and isinstance(data.get("seeded"), list) and all(isinstance(x, str) for x in data["seeded"])
-            and all(isinstance(data.get(k), dict) and all(isinstance(v, dict) for v in data[k].values())
-                    for k in ("leads", "workers"))
-            and isinstance(data.get("pending"), list)
-            and all(isinstance(item, dict) and item.get("kind") in ("briefed", "worker") and "key" in item
-                    and type(item.get("queued_at")) in (int, float) for item in data["pending"]))
+    """Check every field the loop reads; a ledger that fails is set aside and rebuilt without sending."""
+    if not isinstance(data, dict) or data.get("version") != 1:
+        return False
+    data.setdefault("identified", {})
+    return (isinstance(data.get("seeded"), list) and all(x in ("leads", "workers") for x in data["seeded"])
+            and all(isinstance(data.get(k), dict) and all(_valid_record(k, v) for v in data[k].values())
+                    for k in ("leads", "workers", "identified"))
+            and isinstance(data.get("pending"), list) and all(_valid_pending(i) for i in data["pending"]))
 
 
 def load_roster(path):
@@ -541,7 +571,12 @@ def load_roster(path):
         data = None
     if valid_roster(data):
         return data, False
-    os.replace(path, path.with_name(path.name + ".corrupt"))
+    # Keep the damaged file in place until a valid ledger replaces it, so an
+    # interrupted recovery is detected (and silently reseeded) again.
+    try:
+        path.with_name(path.name + ".corrupt").write_bytes(path.read_bytes())
+    except FileNotFoundError:
+        pass
     return empty_roster(), True
 
 
@@ -566,8 +601,22 @@ def update_roster(ledger, agents, workspaces, cfg, coordinator, now, seed):
             del ledger[section][key]
     ledger["pending"] = [item for item in ledger["pending"]
                          if item["kind"] != "worker" or item.get("workspace_id") in workspaces]
+    ledger["identified"] = {pane: rec for pane, rec in ledger["identified"].items()
+                            if rec.get("workspace_id") in workspaces}
     lead_panes = {rec["pane_id"]: key for key, rec in ledger["leads"].items() if rec.get("pane_id")}
+    lead_panes.update({pane: rec["key"] for pane, rec in ledger["identified"].items()})
     leads, workers = classify(agents, workspaces, coordinator, lead_panes)
+    # Identity (this pane is a lead) is kept apart from delivery (it was briefed).
+    for key, _, agent in leads:
+        ledger["identified"][pane_key(agent)] = dict(workspace_id=agent["workspace_id"], key=key)
+    coordinator_spaces = {a.get("workspace_id") for a in agents if a.get("name") == coordinator}
+    found = {pane_key(a) for _, _, a in leads}
+    for agent in sorted(agents, key=lambda a: a.get("pane_id") or ""):
+        pane, name = pane_key(agent), agent.get("name") or ""
+        if (pane in ledger["identified"] and pane not in found and agent.get("pane_id")
+                and agent.get("workspace_id") in workspaces and agent["workspace_id"] not in coordinator_spaces
+                and not HANDOFF_LEAD_RE.match(name)):
+            leads.append((name or pane, name or agent["pane_id"], agent))
     candidates = []
     if cfg.brief_leads:
         silent = "leads" not in ledger["seeded"] and seed
@@ -651,12 +700,12 @@ def roster_step(coordinator, cfg, path):
         return None
     ledger, reseed = load_roster(path)
     if reseed:
-        (path.parent / "loop.err").write_text(f"{path.name} was unreadable; moved to {path.name}.corrupt and reseeded")
+        (path.parent / "loop.err").write_text(f"{path.name} was unreadable; copied to {path.name}.corrupt and reseeded")
     before = json.dumps(ledger, sort_keys=True)
     now = time.time()
     candidates = update_roster(ledger, agents, workspaces, cfg, coordinator, now,
                                seed=cfg.seed_on_first_run or reseed)
-    if json.dumps(ledger, sort_keys=True) != before or not path.exists():
+    if reseed or json.dumps(ledger, sort_keys=True) != before or not path.exists():
         save_roster(path, ledger)
     if cfg.brief_leads:
         labels = workspaces
@@ -693,8 +742,18 @@ def roster_notes(ledger, agents):
 
 
 def coordinator_ready(agent):
+    """Idle, not launching, and showing no question: safe for a roster prompt."""
     target = next((a for a in herdr("agent", "list").get("agents", []) if a.get("name") == agent), None)
-    return bool(target) and target.get("agent_status") in ("idle", "done")
+    return bool(target) and ready_for_prompt(agent, target)
+
+
+def render_roster(roster, state):
+    """Roster text for a notification, or None when it cannot be built (memory alerts must still go out)."""
+    try:
+        return roster_notes(roster["ledger"], roster["agents"])
+    except Exception as exc:
+        (state / "loop.err").write_text(repr(exc))
+        return None
 
 
 def loop(agent, cfg):
@@ -732,8 +791,11 @@ def loop(agent, cfg):
                             now = time.monotonic()
                             if should_notify(result, last_key, last_level, last_sent, now, cfg):
                                 target = next((a for a in herdr("agent", "list").get("agents", []) if a.get("name") == agent), None)
-                                if target and target.get("agent_status") in ("idle", "done"):
-                                    notes, counts = roster_notes(roster["ledger"], roster["agents"]) \
+                                # A roster rides along only when the coordinator also shows no question.
+                                roster_waits = bool(roster and roster["ledger"]["pending"]) and not (
+                                    target and ready_for_prompt(agent, target))
+                                if target and target.get("agent_status") in ("idle", "done") and not roster_waits:
+                                    notes, counts = (render_roster(roster, state) or ("", "")) \
                                         if roster and roster["ledger"]["pending"] else ("", "")
                                     event = state / f"event-{time.time_ns()}.md"
                                     event.write_text(report(result, cfg) + notes)
@@ -748,13 +810,15 @@ def loop(agent, cfg):
                                             save_roster(roster["path"], roster["ledger"])
                     if roster and not notified and roster_due(roster["ledger"], time.time(), cfg):
                         if coordinator_ready(agent):
-                            notes, counts = roster_notes(roster["ledger"], roster["agents"])
-                            event = state / f"event-{time.time_ns()}.md"
-                            event.write_text("# memgate roster\n" + notes)
-                            if delivered(herdr("agent", "prompt", agent,
-                                               f"[memgate]{counts}. Read and review: {event}")):
-                                roster["ledger"]["pending"] = []
-                                save_roster(roster["path"], roster["ledger"])
+                            rendered = render_roster(roster, state)
+                            if rendered:
+                                notes, counts = rendered
+                                event = state / f"event-{time.time_ns()}.md"
+                                event.write_text("# memgate roster\n" + notes)
+                                if delivered(herdr("agent", "prompt", agent,
+                                                   f"[memgate]{counts}. Read and review: {event}")):
+                                    roster["ledger"]["pending"] = []
+                                    save_roster(roster["path"], roster["ledger"])
                 except Exception as exc:
                     (state / "loop.err").write_text(repr(exc))
                 time.sleep(cfg.loop_interval_seconds)

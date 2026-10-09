@@ -492,7 +492,7 @@ class MemgateTests(unittest.TestCase):
         def coordinator(r):
             status = r.get("coordinator", "idle")
             return [] if status is None else [{"workspace_id": "wz", "pane_id": "wz:p1", "name": "coordinator",
-                                               "agent": "pi", "agent_status": status}]
+                                               "agent": "pi", "agent_status": status, **r.get("coordinator_extra", {})}]
         def current():
             return rounds[min(index, len(rounds) - 1)]
         def fake_herdr(*args):
@@ -813,7 +813,7 @@ class MemgateTests(unittest.TestCase):
         self.assertEqual(prompts, [])
         self.assertEqual((state / "roster.json.corrupt").read_text(), "not json")
         self.assertIn("lead-alpha", self.ledger()["leads"])
-        self.assertIn("moved to roster.json.corrupt", (state / "loop.err").read_text())
+        self.assertIn("copied to roster.json.corrupt", (state / "loop.err").read_text())
 
     def test_save_roster_is_atomic(self):
         directory = self.base / "ledger"
@@ -825,6 +825,92 @@ class MemgateTests(unittest.TestCase):
             memgate.save_roster(path, dict(memgate.empty_roster(), leads={"x": object()}))
         self.assertEqual(path.read_text(), original)
         self.assertEqual(list(directory.glob("*.tmp")), [])
+
+    def test_roster_notice_waits_for_coordinator_screen(self):
+        spaces = self.spaces(("wa", "Alpha"))
+        base = dict(agents=self.alpha(), workspaces=spaces)
+        grown = dict(agents=self.alpha(self.agent("wa", "p2", "impl-101")), workspaces=spaces)
+        blocked = [dict(grown, screens={"coordinator": "Enter to select\n❯ 1. Yes"}),
+                   dict(grown, screens={"coordinator": ""}),
+                   dict(grown, coordinator_extra={"launch_pending": True})]
+        for bad in blocked:
+            with self.subTest(bad=bad.get("screens") or bad.get("coordinator_extra")):
+                prompts = self.drive_roster([base, bad, bad, grown], self.roster_cfg())
+                self.assertEqual([(i, t) for i, t, _ in prompts], [(3, "coordinator")])
+                self.assertEqual(self.ledger()["pending"], [])
+        # The same check guards a roster riding on a memory notification.
+        cfg = self.roster_cfg(reminder_seconds=30, roster_batch_seconds=600)
+        prompts = self.drive_roster([base, blocked[0], grown], cfg, analyze=lambda *a, **k: snapshot())
+        self.assertEqual([i for i, _, _ in prompts], [0, 2])
+        self.assertIn("new_workers=1", prompts[1][2])
+
+    def test_unsent_sole_lead_is_still_a_lead_after_the_workspace_grows(self):
+        base = dict(agents=self.alpha(), workspaces=self.spaces(("wa", "Alpha")))
+        spaces = self.spaces(("wa", "Alpha"), ("wq", "Quartz"))
+        busy = dict(agents=self.alpha(self.agent("wq", "p1", status="working")), workspaces=spaces)
+        crowded = dict(agents=self.alpha(self.agent("wq", "p1", status="working"), self.agent("wq", "p2", "impl-1")),
+                       workspaces=spaces)
+        ready = dict(agents=self.alpha(self.agent("wq", "p1"), self.agent("wq", "p2", "impl-1")), workspaces=spaces)
+        self.drive_roster([base, busy, crowded], self.roster_cfg(roster_batch_seconds=600))
+        self.assertEqual([i["key"] for i in self.ledger()["pending"]], ["wq:p2"])
+        prompts = self.drive_roster([base, busy, crowded, ready], self.roster_cfg(roster_batch_seconds=600))
+        self.assertEqual([(i, t) for i, t, _ in self.to_others(prompts)], [(3, "wq:p1")])
+        self.assertEqual(sorted(i["key"] for i in self.ledger()["pending"]), ["wq:p1", "wq:p2"])
+
+    def test_worker_notices_alone_keep_the_lead_identity(self):
+        spaces = self.spaces(("wa", "Alpha"), ("wq", "Quartz"))
+        base = dict(agents=self.alpha(self.agent("wq", "p1")), workspaces=spaces)
+        grown = dict(agents=self.alpha(self.agent("wq", "p1"), self.agent("wq", "p2", "impl-1")), workspaces=spaces)
+        self.drive_roster([base, grown], self.roster_cfg(brief_leads=False, roster_batch_seconds=600))
+        self.assertEqual([i["key"] for i in self.ledger()["pending"]], ["wq:p2"])
+
+    def test_structurally_invalid_ledgers_are_reseeded_without_sending(self):
+        spaces = self.spaces(("wa", "Alpha"))
+        rounds = [dict(agents=self.alpha(), workspaces=spaces)]
+        bad = [dict(version=1, seeded=["leads", "workers"], leads={"lead-alpha": {}}, workers={}, pending=[]),
+               dict(version=1, seeded=["leads", "workers"], leads={}, workers={}, identified={},
+                    pending=[dict(kind="briefed", key="lead-alpha", queued_at=0)]),
+               dict(version=1, seeded=["other"], leads={}, workers={}, identified={}, pending=[]),
+               dict(version=1, seeded=[], leads={"lead-alpha": dict(workspace_id="wa", pane_id="wa:p1",
+                    briefed_at="soon", seeded=False)}, workers={}, identified={}, pending=[])]
+        for ledger in bad:
+            with self.subTest(ledger=ledger):
+                state = memgate.state_path()
+                shutil.rmtree(state, ignore_errors=True)
+                state.mkdir(parents=True)
+                (state / "roster.json").write_text(json.dumps(ledger))
+                prompts = self.drive_roster(rounds, self.roster_cfg(seed_on_first_run=False),
+                                            reset=False, check_err=False)
+                self.assertEqual(prompts, [])
+                self.assertTrue((state / "roster.json.corrupt").exists())
+                self.assertIn("lead-alpha", self.ledger()["leads"])
+
+    def test_roster_rendering_failure_does_not_stop_memory_notification(self):
+        spaces = self.spaces(("wa", "Alpha"))
+        grown = dict(agents=self.alpha(self.agent("wa", "p2", "impl-101")), workspaces=spaces)
+        base = dict(agents=self.alpha(), workspaces=spaces)
+        with patch.object(memgate, "roster_notes", side_effect=KeyError("workspace_id")):
+            prompts = self.drive_roster([base, grown], self.roster_cfg(reminder_seconds=30, roster_batch_seconds=600),
+                                        analyze=lambda *a, **k: snapshot(), check_err=False)
+        self.assertEqual([i for i, _, _ in prompts], [0, 1])
+        self.assertIn("suspects=0. Read and review: ", prompts[1][2])
+
+    def test_interrupted_recovery_does_not_send_to_everyone(self):
+        state = memgate.state_path()
+        state.mkdir(parents=True)
+        path = state / "roster.json"
+        path.write_text("not json")
+        cfg = self.roster_cfg(seed_on_first_run=False)
+        agents = self.alpha(self.agent("wc", "p9", "coordinator"))
+        sent = []
+        with patch.object(memgate, "roster_snapshot", return_value=(agents, {"wa": "Alpha", "wc": "C"})), \
+             patch.object(memgate, "herdr_text", return_value="❯ \n"), \
+             patch.object(memgate, "herdr", side_effect=lambda *a: sent.append(a) or {"success": True}):
+            with patch.object(memgate, "save_roster", side_effect=OSError("disk")), self.assertRaises(OSError):
+                memgate.roster_step("coordinator", cfg, path)
+            memgate.roster_step("coordinator", cfg, path)
+        self.assertEqual(sent, [])
+        self.assertIn("lead-alpha", self.ledger()["leads"])
 
     def fixture_command(self, slot, maximum, wait, command):
         return [sys.executable, str(Path(__file__).resolve()), str(ROOT), str(TEMP), "--fixture-run",

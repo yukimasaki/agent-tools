@@ -102,19 +102,27 @@ last 15 screen lines show no question or permission prompt (`Esc to cancel`,
 only after delivery. A draft typed into the lead's input cannot be detected.
 
 `roster.json` in the state directory records briefed leads by agent name (pane
-ID when unnamed), together with their pane, and known workers by pane ID.
+ID when unnamed), together with their pane, and known workers by pane ID. It
+also remembers which panes were recognized as leads, separately from whether
+they were briefed: a lead that could not be briefed yet stays a lead, and is
+retried, even after more agents join its workspace.
 Records for closed workspaces are removed, so a lead name that appears again
 later is briefed again. A lead renamed in the same pane keeps its record and is
 not briefed again. A lead with a recorded name in a different pane, such as a
 successor that takes the name after a handoff, is briefed again once. With
 `seed_on_first_run` (default true), the first round of each feature records the
-current agents without sending anything. A damaged ledger is moved to
-`roster.json.corrupt` and reseeded without sending. The loop reads the ledger
-again every round.
+current agents without sending anything. A damaged ledger, including one
+with missing or mistyped fields, is copied to `roster.json.corrupt` and rebuilt
+without sending; the damaged file stays in place until the rebuilt ledger is
+saved, so an interrupted rebuild is rebuilt silently again. The loop reads the
+ledger again every round.
 
 Briefed leads and new workers wait in the ledger. They are added to the next
 memory notification, or sent on their own once the oldest has waited
-`roster_batch_seconds`, while the coordinator is idle or done.
+`roster_batch_seconds`. A roster is sent only while the coordinator is idle or
+done, is not launching, and passes the same screen check as a lead; otherwise it
+waits in the ledger for the next round. If the roster text cannot be built, memory
+notifications are still sent without it.
 
 ## Agreement for workspace leads
 
