@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/yukimasaki/agent-tools/compare/v0.1.3...v0.1.4) (2026-10-09)
+
+
+### Features
+
+* **memgate:** loop が新しい lead に取り決めを送り、新しい作業役を調整役に知らせる ([#10](https://github.com/yukimasaki/agent-tools/issues/10)) ([ffe2e39](https://github.com/yukimasaki/agent-tools/commit/ffe2e39c4a2df8a70fd4280c8575ad4755c6de4d))
+
 ## [0.1.3](https://github.com/yukimasaki/agent-tools/compare/v0.1.2...v0.1.3) (2026-10-08)
 
 
