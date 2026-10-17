@@ -71,6 +71,19 @@ Pi does not have every tool available in Claude Code.
 | Ask the user | AskUserQuestion | Write numbered options in the response and wait for an answer |
 | Wait for completion | Background task | Use `herdr agent wait`; receive reports through files rather than a Monitor tool |
 
+## opencode
+
+```bash
+herdr agent start <name> --kind opencode --pane "$PANE" -- --auto --prompt "<initial-instructions>"
+```
+
+- Look up model IDs with `opencode models` (`<provider>/<model-id>`). The listing shows no reasoning levels or context limits.
+- **The interactive TUI has no `--model` option** (verified on opencode v2.0.31). `--model <provider>/<model>#<variant>` exists only on `opencode run`. Pin the model with an `opencode.json` in the worker's directory: `{ "model": "<provider>/<model-id>" }`. Exclude it from git in `$(git rev-parse --git-common-dir)/info/exclude`; inside a worktree `.git` is a file, so `.git/info/exclude` fails. Tell the worker not to commit it.
+- `--auto` approves permissions that are not explicitly denied. `--prompt` sends the initial instructions.
+- The footer shows the agent, permission mode, and model (`Build auto · <model name>`) and the context usage at the bottom right (`126.1K (63%)`). No reasoning level is shown.
+- `~/.config/opencode/service.json` holds the background server's password in plain text. Do not print it while inspecting the configuration.
+- **herdr misreports opencode status and does not name it on start.** See [pitfalls.md](pitfalls.md). Wait for the report file instead of the watcher.
+
 ## Verify after launch
 
 Use `herdr agent read <name> --lines 20` to check the displayed model and reasoning level. **If they differ from the requested values, report the mismatch and restart with the correct arguments.**

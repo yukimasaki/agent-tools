@@ -70,6 +70,31 @@ Idle screens have an input field or footer at the bottom, so old copied worker s
 
 **This detection applies only to Claude Code leads. Pi lead question screens are not detected.** Inspect actual screens before adding markers.
 
+## agent start times out but the agent runs unnamed
+
+`herdr agent start` can return `timeout` (`timed out waiting for agent startup`) even though the agent started and began working on the initial instructions. The agent then has no name, so `herdr agent read <name>` returns `agent_not_found` and the watcher does not know it. This happened with Claude Code (`--timeout 60000`) and opencode (`--timeout 90000`).
+
+After a timeout, read the pane (`herdr pane read <pane> --lines 30`) before retrying. If the agent is running, name it with `herdr agent rename <pane_id> <name>`. Do not start a second agent in the same pane.
+
+## herdr reports a working opencode as done
+
+With opencode v2.0.31, herdr reported `done` about three minutes after start while opencode kept working for another 25 minutes. `state_change_seq` did not change across repeated reads. The watcher sent a false stop notice and then could not detect the real end, because the status never left `done`.
+
+For opencode workers, do not rely on the watcher. Wait for the report file in the lead, and treat the worker as stalled when the context usage at the bottom right of the footer (`135.7K (68%)`) stays unchanged for about ten minutes:
+
+```bash
+R=<report-path>; prev=""; same=0
+while [ ! -f "$R" ]; do
+  cur=$(herdr pane read <pane> --lines 2 | tail -1 | grep -oE '[0-9.]+K \([0-9]+%\)')
+  if [ "$cur" = "$prev" ]; then same=$((same+1)); else same=0; prev=$cur; fi
+  [ $same -ge 20 ] && { echo "stalled at $cur"; exit 0; }
+  sleep 30
+done
+echo "report: $R"
+```
+
+A watcher fix would recognize `agent` = `opencode` and judge the end from the report file and footer changes instead of `agent_status`. It is not implemented.
+
 ## Unverified behavior
 
 - **Confirmation markers outside Claude Code.** The worker markers (`Do you want to proceed?`, `Permission rule`, `❯ 1.`) come from Claude Code. Codex confirmation screens have not been verified on a live harness; do not add guessed markers. Without markers, persistent `blocked` is detected on the second observation (30–60 seconds at the default interval).
