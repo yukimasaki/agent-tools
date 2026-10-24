@@ -16,6 +16,8 @@ PANE=$(echo "$OUT" | jq -r '.result.root_pane.pane_id')
 
 ## Start an agent
 
+For a worker tab plus verified receipt of its first brief, use [start.sh](start.md). It creates the tab with an explicit workspace and `--no-focus`, repairs an unnamed agent after a startup timeout when safe, and stops at confirmations without answering them. The raw commands below remain useful for manual harness operations.
+
 ```bash
 herdr agent start <name> --kind <claude|codex|agy|pi|…> --pane "$PANE" [--timeout <ms>] -- <harness-arguments>
 ```
@@ -58,3 +60,9 @@ herdr agent prompt <worker> "<reason-and-revision-instructions>"
 - Claude Code may enter `done` while a background shell is still running. The screen can show `· done <time> · 1 shell still running` and a footer containing `· 1 shell`. Other harnesses' displays are unverified; inspect them rather than assuming the same footer.
 - Closing a workspace removes its agents. `agent get` returns `agent_not_found`; `workspace get` returns `workspace_not_found`. There is no `gone` status.
 - Human notification command: `herdr notification show "<title>" [--body <text>] [--position <top-left|top-right|bottom-left|bottom-right>] [--sound <none|done|request>]`.
+
+## Verify the watcher is observing
+
+After ensuring `watch.sh --ensure <lead-name>`, poll `watch.sh --ready <lead-name>` in bounded intervals before launching an Issue worker. The launcher's PID check alone does not prove that the first observation has completed. Readiness checks the current PID and process start time against `watch.ready`; it never starts or replaces a watcher. Only the owning lead may restart an older watcher without a readiness record.
+
+For a permission screen around an Issue merge, follow the operator-facing instructions in [merge.md](../../take-issue/references/merge.md). GitHub approval plus the human request do not authorize broad or permanent permission changes.

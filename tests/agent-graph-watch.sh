@@ -731,14 +731,35 @@ start_fg() {
 if [[ -r /proc/self/stat ]]; then
   new_case dup
   mklist 1 idle
+  cp "$STUB/list.1.json" "$STUB/list.last.json"
   mkdir -p "$STATE/w1"
   sleep 30 & holder=$!
   echo "$holder $(proc_start "$holder") lead-9" >"$STATE/w1/watch.pid"
   out="$(STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" bash "$WATCH" lead-9 2>&1)"; rc=$?
   expect "Launcher exits zero without action for a live same-lead watcher" bash -c '[[ "$1" -eq 0 && "$2" == *"already running:"* ]]' _ "$rc" "$out"
+  ready_rc=0
+  STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" bash "$WATCH" --ready lead-9 >/dev/null 2>&1 || ready_rc=$?
+  expect "Readiness rejects a live PID without a first observation" test "$ready_rc" -ne 0
+  printf '%s %s lead-9\n' "$holder" "$(proc_start "$holder")" >"$STATE/w1/watch.ready"
+  ready_rc=0
+  STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" bash "$WATCH" --ready lead-9 >/dev/null 2>&1 || ready_rc=$?
+  expect "Readiness accepts the same PID and process start time" test "$ready_rc" -eq 0
+  printf '%s 1 lead-9\n' "$holder" >"$STATE/w1/watch.ready"
+  ready_rc=0
+  STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" bash "$WATCH" --ready lead-9 >/dev/null 2>&1 || ready_rc=$?
+  expect "Readiness rejects a stale process identity" test "$ready_rc" -ne 0
   rm -f "$STUB/calls"
   out2="$(STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" AGENT_GRAPH_WATCH_FOREGROUND=1 bash "$WATCH" lead-9 2>&1)"; rc2=$?
   expect "Foreground watcher exits zero without action for a live same-lead watcher" bash -c '[[ "$1" -eq 0 && "$2" == *"already running:"* ]]' _ "$rc2" "$out2"
+  printf '%s %s lead-other\n' "$holder" "$(proc_start "$holder")" >"$STATE/w1/watch.pid"
+  ensure_rc=0
+  STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" bash "$WATCH" --ensure lead-9 >/dev/null 2>&1 || ensure_rc=$?
+  expect "Ensure mode refuses to replace another lead watcher" test "$ensure_rc" -ne 0
+  expect "Ensure mode leaves the other watcher alive and recorded" bash -c 'kill -0 "$1" && [[ "$(cut -d" " -f3 "$2")" == lead-other ]]' _ "$holder" "$STATE/w1/watch.pid"
+  ensure_rc=0
+  STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" AGENT_GRAPH_WATCH_FOREGROUND=1 bash "$WATCH" --ensure lead-9 >/dev/null 2>&1 || ensure_rc=$?
+  expect "Foreground ensure also refuses replacement under its claim lock" test "$ensure_rc" -ne 0
+  printf '%s %s lead-9\n' "$holder" "$(proc_start "$holder")" >"$STATE/w1/watch.pid"
 
   # A different starttime identifies PID reuse, not a live watcher.
   echo "$holder 1 lead-9" >"$STATE/w1/watch.pid"; : >"$STATE/w1/watch.log"
@@ -767,6 +788,12 @@ if [[ -r /proc/self/stat ]]; then
   cp "$STUB/list.1.json" "$STUB/list.last.json"
   out="$(STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" AGENT_GRAPH_WATCH_INTERVAL=1 bash "$WATCH" lead-9 2>&1)"
   oldpid="$(cut -d' ' -f1 "$STATE/w1/watch.pid")"
+  ready_rc=1
+  for _ in $(seq 1 20); do
+    STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" bash "$WATCH" --ready lead-9 >/dev/null 2>&1 && { ready_rc=0; break; }
+    sleep 0.05
+  done
+  expect "A launched watcher confirms its first observation without restarting" test "$ready_rc" -eq 0
   out2="$(STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" AGENT_GRAPH_WATCH_INTERVAL=1 bash "$WATCH" lead-7 2>&1)"
   newpid="$(cut -d' ' -f1 "$STATE/w1/watch.pid")"; newlead="$(cut -d' ' -f3 "$STATE/w1/watch.pid")"
   sleep 0.3

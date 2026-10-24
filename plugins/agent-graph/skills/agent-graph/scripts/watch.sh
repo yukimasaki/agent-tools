@@ -45,8 +45,14 @@ PROMPT_MARK_RE="$PERMISSION_RE|❯ [0-9]\\."
 
 die() { echo "agent-graph watch: $*" >&2; exit 1; }
 
+CHECK_READY=false
+ENSURE=false
 case "${1:-}" in
-  -h|--help) echo "Usage: watch.sh <lead-agent-name>"; exit 0 ;;
+  --ready) CHECK_READY=true; shift ;;
+  --ensure) ENSURE=true; shift ;;
+esac
+case "${1:-}" in
+  -h|--help) echo "Usage: watch.sh [--ready|--ensure] <lead-agent-name>"; exit 0 ;;
   "") die "a lead agent name is required (example: watch.sh lead-123)" ;;
   -*) die "unknown option: $1" ;;
 esac
@@ -68,6 +74,7 @@ jq -e --arg n "$LEAD" --arg ws "$WS" '[.result.agents[]? | select(.name == $n an
 
 STATE_DIR="$STATE_ROOT/$WS"
 PID_FILE="$STATE_DIR/watch.pid"
+READY_FILE="$STATE_DIR/watch.ready"
 LOG_FILE="$STATE_DIR/watch.log"
 mkdir -p "$STATE_DIR" || die "cannot create $STATE_DIR"
 HAVE_FLOCK=false
@@ -133,6 +140,7 @@ claim() {
     read -r cur_pid cur_lead <<<"$cur"
     if [[ "$cur_pid" != "$$" ]]; then
       if [[ "$cur_lead" == "$LEAD" ]]; then lock_drop watch 9; return 3; fi
+      if $ENSURE; then lock_drop watch 9; die "watcher belongs to $cur_lead; it was not replaced"; fi
       stop_pid "$cur_pid"
       log "stopped watcher $cur_pid for a different lead (${cur_lead:-unknown})"
     fi
@@ -140,6 +148,18 @@ claim() {
   echo "$$ $(proc_start "$$" | sed 's/ /_/g') $LEAD" >"$PID_FILE"
   lock_drop watch 9
 }
+
+if $CHECK_READY; then
+  if cur="$(running_pid)"; then
+    read -r cur_pid cur_lead <<<"$cur"
+    expected="$cur_pid $(proc_start "$cur_pid" | sed 's/ /_/g') $LEAD"
+    if [[ "$cur_lead" == "$LEAD" && "$(cat "$READY_FILE" 2>/dev/null)" == "$expected" ]]; then
+      echo "ready: workspace=$WS pid=$cur_pid lead=$LEAD"
+      exit 0
+    fi
+  fi
+  die "first observation is not confirmed for $LEAD; no watcher was started or replaced"
+fi
 
 
 if [[ "${AGENT_GRAPH_WATCH_FOREGROUND:-0}" != 1 ]]; then
@@ -152,12 +172,15 @@ if [[ "${AGENT_GRAPH_WATCH_FOREGROUND:-0}" != 1 ]]; then
       echo "already running: workspace=$WS pid=$cur_pid lead=$cur_lead log=$LOG_FILE"
       exit 0
     fi
+    if $ENSURE; then lock_drop start 8; die "watcher belongs to $cur_lead; it was not replaced"; fi
     echo "watcher for a different lead (${cur_lead:-unknown}): stopping $cur_pid and restarting for $LEAD"
   fi
   # Use nohup alone on systems without setsid (such as macOS).
   detach=(nohup)
   if [[ "${AGENT_GRAPH_NO_SETSID:-0}" != 1 ]] && command -v setsid >/dev/null 2>&1; then detach=(setsid nohup); fi
-  AGENT_GRAPH_WATCH_FOREGROUND=1 "${detach[@]}" bash "${BASH_SOURCE[0]}" "$LEAD" >>"$LOG_FILE" 2>&1 </dev/null 8>&- &
+  child_args=()
+  $ENSURE && child_args+=(--ensure)
+  AGENT_GRAPH_WATCH_FOREGROUND=1 "${detach[@]}" bash "${BASH_SOURCE[0]}" "${child_args[@]}" "$LEAD" >>"$LOG_FILE" 2>&1 </dev/null 8>&- &
   # Return only after the child records its PID and is confirmed alive.
   p=""
   for _ in $(seq 1 50); do
@@ -183,7 +206,7 @@ if (( rc == 3 )); then
   exit 0
 fi
 (( rc == 0 )) || die "cannot write PID file: $PID_FILE"
-trap '[[ "$(cut -d" " -f1 "$PID_FILE" 2>/dev/null)" == "$$" ]] && rm -f "$PID_FILE"' EXIT
+trap '[[ "$(cut -d" " -f1 "$PID_FILE" 2>/dev/null)" == "$$" ]] && rm -f "$PID_FILE" "$READY_FILE"' EXIT
 
 # Per-pane records: lead/human notified seq, previous blocked seq, exited
 # delivery, previous wake seq, human failure key/count, tail cache, name/tab.
@@ -193,6 +216,7 @@ LEAD_TARGET=""; LEAD_STATUS=""; LEAD_KIND=""
 # SENT: delivered this round. OBSERVED means observe has run at least once.
 W_PANE=(); W_NAME=(); W_TAB=(); W_STATUS=(); W_SEQ=(); W_TOLD=(); W_SENT=(); W_URGENT=()
 OBSERVED=false
+READY_WRITTEN=false
 lead_missing=0
 round=0
 
@@ -426,6 +450,13 @@ while true; do
     else
       lead_missing=0
       observe "$list_json"
+      if ! $READY_WRITTEN; then
+        if printf '%s %s %s\n' "$$" "$(proc_start "$$" | sed 's/ /_/g')" "$LEAD" >"$READY_FILE.tmp.$$" && mv -f "$READY_FILE.tmp.$$" "$READY_FILE"; then
+          READY_WRITTEN=true
+        else
+          log "cannot record first observation readiness"
+        fi
+      fi
       flush
       notify_human
     fi

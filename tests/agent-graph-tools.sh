@@ -100,6 +100,13 @@ new_repo pr2
 run bash "$PR" --title "Title" --body-file "$BODY" --gh-user octocat --draft >/dev/null 2>&1
 expect "--draft creates a draft" grep -q -- "pr create .*--draft" "$STUB_DIR/gh.log"
 
+new_repo reviewer
+run bash "$PR" --title "Title" --body-file "$BODY" --gh-user octocat --reviewer example-reviewer >/dev/null 2>&1; rc=$?
+expect "Requests the configured reviewer on PR creation" bash -c '[[ "$1" -eq 0 ]] && grep -q "pr create .*--reviewer example-reviewer" "$2"' _ "$rc" "$STUB_DIR/gh.log"
+echo "https://github.com/o/r/pull/7 false" >"$STUB_DIR/existing-pr"
+run bash "$PR" --title "Title" --body-file "$BODY" --gh-user octocat --reviewer example-reviewer >/dev/null 2>&1; rc=$?
+expect "Requests the reviewer when reusing a PR" bash -c '[[ "$1" -eq 0 ]] && grep -q "pr edit https://github.com/o/r/pull/7 --add-reviewer example-reviewer" "$2"' _ "$rc" "$STUB_DIR/gh.log"
+
 new_repo pr3
 echo dirty >"$REPO/c"
 run bash "$PR" --title "Title" --body-file "$BODY" --gh-user octocat >/dev/null 2>&1; rc=$?

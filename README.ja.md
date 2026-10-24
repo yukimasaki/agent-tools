@@ -12,8 +12,8 @@
 ## 必要なもの
 
 - [herdr](https://herdr.dev)（エージェントは herdr の pane の中で動かす。`HERDR_ENV=1`）
-- Bash 4 以上、`jq`、`git`。PR の道具には [GitHub CLI](https://cli.github.com/)
-- memgate には Python 3.11 以上（標準ライブラリだけ）
+- Bash 4 以上、`jq`、`git`。PR と Issue の道具には [GitHub CLI](https://cli.github.com/)
+- memgate と agent-graph の起動の道具には Python 3.11 以上（標準ライブラリだけ）
 - memgate が対応するのは **Linux と WSL** だけ（`/proc` と PSI を読む）
 
 ## インストール
@@ -52,13 +52,24 @@ Pi は `package.json` の `pi.skills` に列挙したスキル（Pi で動作を
 
 | スキル | 確認済み | 内容 |
 |---|---|---|
-| `agent-graph` | Claude Code、Codex、Pi | lead と作業役の命名、lead の昇格と引き継ぎ、`watch.sh`（作業役が止まったり承認待ちになったりしたら lead を起こす）、`pr.sh`、`review.sh`、claude・codex・agy・Pi の起動引数 |
+| `agent-graph` | Claude Code、Codex、Pi | lead と作業役の命名、lead の昇格と引き継ぎ、`watch.sh`（作業役が止まったり承認待ちになったりしたら lead を起こす）、`start.sh`（タブの作成から最初の指示の受付確認まで）、`pr.sh`、`review.sh`、claude・codex・agy・Pi の起動引数 |
+| `take-issue` | Claude Code | 「#N を取得して」から既存 workspace の作業タブを起動し、「#N をマージして」で本人の PR の管理者 Approve と必須 CI を確認して取り込む |
 
 ### memgate プラグイン
 
 | スキル | 確認済み | 内容 |
 |---|---|---|
 | `memgate` | Claude Code | 重い起動の前の `gate`、同時実行の枠を取る `run`、`status`、メモリが減ったら調整役のエージェントに知らせる `loop`（設定で有効にすると、新しい lead への取り決めの送付と、新しい作業役の報告も行う） |
+
+## 作業役の起動
+
+agent-graph の [`start.sh`](plugins/agent-graph/skills/agent-graph/references/start.md) は、既存 workspace にタブを作り、指示書の受付まで確かめます。起動の時間切れでは同じ pane を読み、無名の agent を安全に確認できた場合だけ命名します。信頼や更新の確認には自動で答えません。
+
+管理者は導入時に engine・モデル・推論・権限の組を承認できます。番号を入力する人には毎回選ばせず、新しい engine と権限の拡大時には承認し直します。
+
+## Issue 番号から始める
+
+`/agent-graph:take-issue` または「#42 を取得して」で、事前に担当を割り当てた Issue の作業を始めます。管理者は [入口の設定](plugins/agent-graph/skills/take-issue/references/setup.md) を先に行います。入口は既存 workspace にタブを足し、Issue ごとに workspace を増やしません。PR 前にはレビューと簡素化を行い、設定済み管理者へレビューを依頼します。「#42 をマージして」は、その利用者本人の PR だけを、最新コミットへの管理者の Approve と必須 CI を確認して取り込みます。ハーネスの追加確認が残る場合は、利用者の言語で対象と操作を案内します。英語の「Merge #42」など、ほかの言語の明示的な依頼も同じ入口で扱います。OpenCode は手動の控えとして扱います。
 
 ## 設定
 

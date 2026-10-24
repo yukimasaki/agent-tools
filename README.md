@@ -12,8 +12,8 @@ The skills hold only minimal tools and the knowledge of *when to do what*. They 
 ## Requirements
 
 - [herdr](https://herdr.dev) (the agents run inside herdr panes; `HERDR_ENV=1`)
-- Bash 4 or newer, `jq`, `git`, and the [GitHub CLI](https://cli.github.com/) for the PR helper
-- Python 3.11 or newer for memgate (standard library only)
+- Bash 4 or newer, `jq`, `git`, and the [GitHub CLI](https://cli.github.com/) for the PR and Issue helpers
+- Python 3.11 or newer for memgate and the agent-graph startup helper (standard library only)
 - memgate supports **Linux and WSL** only (it reads `/proc` and PSI)
 
 ## Install
@@ -52,13 +52,24 @@ Each skill records the agents it has been verified with in its `SKILL.md` frontm
 
 | Skill | Verified on | What it does |
 |---|---|---|
-| `agent-graph` | Claude Code, Codex, Pi | Lead and worker naming, lead promotion and handoff, `watch.sh` (wakes the lead when a worker stops or waits for approval), `pr.sh`, `review.sh`, launch arguments for claude / codex / agy / Pi |
+| `agent-graph` | Claude Code, Codex, Pi | Lead and worker naming, lead promotion and handoff, `watch.sh` (wakes the lead when a worker stops or waits for approval), `start.sh` (tab creation through first-brief receipt), `pr.sh`, `review.sh`, launch arguments for claude / codex / agy / Pi |
+| `take-issue` | Claude Code | Start an assigned Issue in the existing workspace; on an explicit merge request, merge only the operator's PR after administrator approval and required CI |
 
 ### memgate plugin
 
 | Skill | Verified on | What it does |
 |---|---|---|
 | `memgate` | Claude Code | `gate` before heavy launches, `run` with a concurrency slot, `status`, and a `loop` that alerts a coordinator agent when memory runs low and, when enabled, briefs new workspace leads and reports new workers |
+
+## Launch a worker
+
+agent-graph's [`start.sh`](plugins/agent-graph/skills/agent-graph/references/start.md) creates a tab in an existing workspace and confirms receipt of its brief. After a startup timeout, it inspects that same pane and names an unnamed matching agent only when safe. It never automatically answers trust or update confirmations.
+
+An administrator can approve an exact engine / model / reasoning / permission profile once during setup. Reuse that profile without asking the Issue operator each time; new engines and broader permissions need fresh approval.
+
+## Start an Issue by number
+
+Use `/agent-graph:take-issue` or ask to start Issue #42 after the administrator completes [entry setup](plugins/agent-graph/skills/take-issue/references/setup.md). The skill prepares an assigned Issue and adds a worker tab to the existing workspace. It does not create an Issue workspace. Workers review and simplify before the lead requests the configured administrator reviewer. An explicit merge request can merge only that operator's PR with current-head approval and required CI. Requests and explanations use the operator's language; `Merge #42` and `#42 をマージして` are equivalent examples. Additional harness confirmations remain in force. OpenCode remains a manual fallback.
 
 ## Configuration
 

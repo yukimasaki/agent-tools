@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "repo": "example/demo",
+  "github_user": "example-user",
+  "launch": {
+    "kind": "claude",
+    "args": [
+      "--model",
+      "<approved-model>",
+      "--effort",
+      "<approved-effort>",
+      "--permission-mode",
+      "<approved-mode>"
+    ]
+  },
+  "approval": {
+    "by": "<administrator>",
+    "at": "<approval-date>",
+    "launch_sha256": "<hash-after-approval>"
+  },
+  "reviewer": "example-administrator"
+}
