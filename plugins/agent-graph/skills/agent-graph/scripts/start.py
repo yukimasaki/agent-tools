@@ -31,6 +31,7 @@ def arguments():
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--pane")
     parser.add_argument("--timeout", type=int, default=120000, metavar="MS")
+    parser.add_argument("--ready-grace", type=float, default=15, metavar="SECONDS")
     parser.add_argument("native_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.native_args[:1] == ["--"]:
@@ -45,6 +46,8 @@ def arguments():
         raise Stop(2, "invalid", "invalid run ID")
     if not args.workspace or args.timeout <= 0:
         raise Stop(2, "invalid", "workspace and a positive timeout are required")
+    if not math.isfinite(args.ready_grace) or args.ready_grace < 0:
+        raise Stop(2, "invalid", "--ready-grace must be a finite number of seconds, zero or more")
     for name in ("cwd", "brief", "report", "receipt"):
         path = Path(getattr(args, name))
         if not path.is_absolute():
@@ -67,11 +70,12 @@ class Launch:
         self.args = args
         self.deadline = time.monotonic() + args.timeout / 1000
         self.sha = hashlib.sha256(Path(args.brief).read_bytes()).hexdigest()
-        self.identity = digest({k: v for k, v in vars(args).items() if k not in {"pane", "timeout"}} | {"brief_sha256": self.sha})
+        self.identity = digest({k: v for k, v in vars(args).items() if k not in {"pane", "timeout", "ready_grace"}} | {"brief_sha256": self.sha})
         self.info = {k: getattr(args, k) for k in ("workspace", "cwd", "name", "kind", "brief", "report", "receipt", "run_id")}
         self.info.update(tab=None, pane=args.pane)
         self.log_path = Path(args.receipt + ".start.jsonl")
         self.events = []
+        self.unrecognized_since = None
 
     def remaining(self):
         seconds = self.deadline - time.monotonic()
@@ -186,7 +190,7 @@ class Launch:
         except (OSError, ValueError):
             return False
 
-    def screen(self, agent, *, readiness=True):
+    def screen(self, agent, *, readiness=True, may_wait=True):
         text = self.command("agent", "read", self.info["pane"], "--lines", "20", json_output=False)
         tail = "\n".join(line for line in text.splitlines() if line.strip())
         if (agent.get("agent_status") == "blocked" or
@@ -205,13 +209,25 @@ class Launch:
         prompts = {"claude": "❯", "codex": "›"}
         marker = prompts.get(self.args.kind)
         lines = tail.splitlines()[-8:]
-        footer = re.compile(r"\s*(?:[─━-].*[─━-]|⏵⏵.*|(?:personal|team|pro|max|api)\s*\|.*|\? for shortcuts.*)", re.I)
+        footer = re.compile(r"\s*(?:[─━-].*[─━-]|⏵⏵.*|(?:personal|team|pro|max|api)\s*\|.*|\? for shortcuts.*"
+                            r"|[◐◑◒◓○●]\s+\S+\s+·\s+/effort\s*|Not logged in · Run /login\s*)", re.I)
         ready = marker and any((line.strip() == marker or
                                 (self.args.kind == "claude" and re.fullmatch(r'❯\s+Try "[^"\n]*"', line.strip())))
                                and all(footer.fullmatch(rest) for rest in lines[i + 1:])
                                for i, line in enumerate(lines))
         if not ready:
+            if not may_wait:
+                raise Stop(5, "unverified", "input screen is unrecognized; inspect it manually")
+            # A startup notice or a wrapped footer can be on screen for a few
+            # seconds. Read again until the grace period ends, then stop.
+            now = time.monotonic()
+            if self.unrecognized_since is None:
+                self.unrecognized_since = now
+            self.remaining()
+            if now - self.unrecognized_since < self.args.ready_grace:
+                return False
             raise Stop(5, "unverified", "input screen is unrecognized; inspect it manually")
+        self.unrecognized_since = None
         return True
 
     def run(self):
@@ -289,7 +305,7 @@ class Launch:
             if self.has("prompt_attempt") and old_session is None:
                 raise Stop(5, "unverified", "session identity is unavailable; inspect the previous delivery manually")
             if session is None:
-                self.screen(agent)
+                self.screen(agent, may_wait=False)
                 raise Stop(5, "unverified", "session identity is unavailable; no input was sent")
             if not self.has("session"):
                 self.record("session", session=session)
@@ -319,7 +335,7 @@ class Launch:
                        "A receipt acknowledges instructions; it does not mean the task is complete.")
             self.record("prompt_attempt")
             agent = self.observe()
-            if not agent or not self.screen(agent):
+            if not agent or not self.screen(agent, may_wait=False):
                 raise Stop(5, "unverified", "agent changed before instruction delivery; inspect before resuming")
             try:
                 self.command("agent", "prompt", self.info["pane"], message)

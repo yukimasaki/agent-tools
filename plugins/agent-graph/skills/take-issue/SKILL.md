@@ -47,11 +47,12 @@ if prepared.get("result") != "prepared":
 argv = ["bash", sys.argv[2]]
 for key in ("workspace", "cwd", "name", "kind", "brief", "report", "receipt", "run_id"):
     argv.extend(["--" + key.replace("_", "-"), prepared[key]])
+argv.extend(sys.argv[3:])
 argv.extend(["--", *prepared["native_args"]])
 raise SystemExit(subprocess.run(argv).returncode)
 ```
 
-Pass the prepared file path and `$GRAPH/scripts/start.sh` to this call site. `start.sh` owns tab creation and first-brief receipt. Do not create a second tab around it. For a stopped launch, inspect the returned pane and follow [start.md](../agent-graph/references/start.md); `--pane` only resumes the same recorded run. Never resend an ambiguous prompt automatically.
+Pass the prepared file path and `$GRAPH/scripts/start.sh` to this call site. `start.sh` owns tab creation and first-brief receipt. Do not create a second tab around it. To resume a stopped run, pass the same prepared file and script, then `--pane <returned pane>` after them. For a stopped launch, inspect the returned pane and follow [start.md](../agent-graph/references/start.md); `--pane` only resumes the same recorded run. Never resend an ambiguous prompt automatically.
 
 ## Tell the operator what happened
 

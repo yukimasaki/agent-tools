@@ -69,6 +69,9 @@ elif a[:2]==['agent','read']:
  elif mode=='historical_blank_input':print('❯\nAn unfamiliar current screen')
  elif mode=='placeholder':print('❯\u00a0Try "how does <filepath> work?"\n──────\n  ⏵⏵ accept edits on')
  elif mode=='ack_after_idle_render' and d.get('prompted'):print('❯ Submitted brief\nThinking...')
+ elif mode=='wrapped_effort':print('❯ Try "edit index.html to..."\n'+'─'*75+'\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n'+' '*55+'◐ medium · /effort')
+ elif mode=='not_logged_in':print('❯\n'+'─'*75+'\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n'+' '*41+'Not logged in · Run /login')
+ elif mode=='late_ready':d['late_reads']=d.get('late_reads',0)+1;save();print('❯ ' if d['late_reads']>3 else 'An unfamiliar screen')
  else:print('› ' if d['agent']['agent']=='codex' else '❯ ')
 elif a[:2]==['agent','rename']:
  d['agent']['name']=a[3];emit(agent=d['agent'])
@@ -192,6 +195,29 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(self.run_start()[0],0)
         self.assertEqual(len(self.calls('agent prompt')),1)
 
+    def test_wrapped_effort_footer_is_an_empty_input(self):
+        self.set(mode='wrapped_effort')
+        self.assertEqual(self.run_start()[0], 0)
+        self.assertEqual(len(self.calls('agent prompt')), 1)
+
+    def test_not_logged_in_footer_is_an_empty_input(self):
+        self.set(mode='not_logged_in')
+        self.assertEqual(self.run_start()[0], 0)
+        self.assertEqual(len(self.calls('agent prompt')), 1)
+
+    def test_screen_recognized_within_ready_grace_receives_one_instruction(self):
+        self.set(mode='late_ready')
+        self.assertEqual(self.run_start()[0], 0)
+        self.assertEqual(len(self.calls('agent prompt')), 1)
+
+    def test_confirmation_stops_without_waiting_for_ready_grace(self):
+        self.set(mode='trust')
+        began = time.monotonic()
+        rc, out = self.run_start('--ready-grace', '10')
+        self.assertEqual((rc, out['result']), (4, 'needs_confirmation'))
+        self.assertLess(time.monotonic() - began, 3)
+        self.assertFalse(self.calls('agent prompt'))
+
     def test_api_hang_respects_overall_deadline(self):
         self.set(mode='api_hang')
         began=time.monotonic()
@@ -262,7 +288,7 @@ class StartupTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.set(mode=mode, calls=[], agent=None)
                 Path(str(self.receipt)+'.start.jsonl').unlink(missing_ok=True)
-                self.assertEqual(self.run_start()[0], 5)
+                self.assertEqual(self.run_start('--ready-grace', '0.5')[0], 5)
                 self.assertFalse(self.calls('agent prompt'))
 
     def test_lost_tab_result_does_not_create_second_tab(self):
@@ -293,7 +319,7 @@ class StartupTests(unittest.TestCase):
         self.assertFalse(self.calls('tab create'))
 
     def test_invalid_arguments_have_no_mutations(self):
-        for extra, native in [(('--name','Wrong.Name'), None), ((), ['claude']), ((), ['--prompt','task'])]:
+        for extra, native in [(('--name','Wrong.Name'), None), ((), ['claude']), ((), ['--prompt','task']), (('--ready-grace','-1'), None)]:
             with self.subTest(extra=extra, native=native):
                 self.assertEqual(self.run_start(*extra, native=native)[0], 2)
         self.assertFalse(self.calls('tab create'))
