@@ -14,7 +14,7 @@ Keep only small tools and knowledge about when to use them, so individual parts 
 - Lists of model names or reasoning levels. Look up current values when launching.
 - A ledger, persistent graph state, or a graph topology embedded in the tools.
 
-Requirements: run inside herdr (`HERDR_ENV=1`); install `jq`. The watcher requires Bash 4 or newer.
+Requirements: run inside herdr (`HERDR_ENV=1`); install `jq`. `start.sh` requires Python 3.11 or newer (standard library only). The watcher requires Bash 4 or newer.
 
 ## Graph structure
 
@@ -28,10 +28,11 @@ Agent names must be unique throughout herdr: 1–32 characters, starting with a 
 
 | Role | Agent name | Example |
 |---|---|---|
-| Active lead | `lead-<number>`, or `lead-<short-name>` for an investigation without a number | `lead-123`, `lead-research` |
+| Active lead | `lead-<number>`, or `lead-<project>` / `lead-<project>-<topic>` | `lead-123`, `lead-demo`, `lead-demo-rec` |
 | Previous lead after handoff | `lead-<number>-g<generation>` | `lead-123-g1` |
-| Worker | `<role>-<issue-number>` | `impl-456`, `review-456` |
+| Worker | `<role>-<issue-number>` or `<role>-<project><issue-number>` | `impl-456`, `impl-demo42`, `review-demo42` |
 
+- Keep separate workspaces for separate concern leads; each runs one watcher. Issue workers get tabs in their lead's existing workspace. Project-prefixed names avoid cross-repository collisions; leave room for `-next` and `-gN`.
 - The watcher treats every agent whose name does not start with `lead-` as a worker, including unnamed agents.
 - If an Epic in another repository has the same number and causes `agent_name_taken`, stop and inform the user. See [pitfalls.md](references/pitfalls.md).
 
@@ -61,8 +62,11 @@ Workers continue writing to their assigned report paths after handoff. The watch
 
 | Tool | Usage | Behavior |
 |---|---|---|
-| `scripts/watch.sh` | `watch.sh <lead-agent-name>` | Polls workers in the workspace every 30 seconds. Wakes the lead and notifies the user when a worker is `blocked` or stops in `done` / `idle`. Holds only notification sequences, previous-round observations, process-exit notices, and notification retry counts. A `blocked` worker with confirmation markers triggers a human notice immediately; other stops trigger one after delivery to the lead or two consecutive observations. Failed human notices retry while the stop persists, giving up after three failures. Suppresses workers waiting for background shells (`· N shell` in the footer) and transient `blocked` states without confirmation markers. Also detects exited agents whose panes remain. Defers lead delivery during `working` / `blocked` or a detected Claude Code question screen, without marking the notice as sent. Re-reads the lead by name immediately before sending; failed reads also defer delivery. Replaces a watcher for a different lead in the same workspace. Exits when the workspace closes or the lead disappears. PID and log files live in `~/.local/state/agent-graph/<workspace_id>/`. |
-| `scripts/pr.sh` | `pr.sh --title <title> --body-file <absolute-path> [--gh-user <account>] [--base main] [--draft]` | Requires a clean worktree, pushes, creates a ready PR, and prints its URL. Resolves authentication once and pins the token for gh operations and HTTPS GitHub pushes. Without `--gh-user`, uses the environment token's owner or gh's active account. Reuses an existing open PR for the branch and base, promoting a draft to ready unless `--draft` is requested. |
+| `scripts/start.sh` | `start.sh --workspace <id> --cwd <path> --name <name> --kind <kind> --brief <path> --report <path> --receipt <path> --run-id <id> [--pane <id>] [--timeout <ms>] [-- <native-args...>]` | Creates one worker tab and confirms a matching run ID and brief SHA-256 receipt. On startup failure, inspects the same pane and repairs an unnamed matching agent. Never automatically answers confirmations or repeats an ambiguous start/prompt. `--pane` resumes only the same recorded run. See [start.md](references/start.md). |
+| `scripts/prepare-issue.sh` | `prepare-issue.sh --project <checkout> --workspace <id> --issue <number>` | Reads project and approved machine settings, prepares or reuses a worktree, runs project-owned preparation, and writes a brief. It never launches a worker. The [take-issue skill](../take-issue/SKILL.md) connects preparation and startup. |
+| `scripts/watch.sh` | `watch.sh [--ready\|--ensure] <lead-agent-name>` | Polls workers in the workspace every 30 seconds. Wakes the lead and notifies the user when a worker is `blocked` or stops in `done` / `idle`. Holds only notification sequences, previous-round observations, process-exit notices, and notification retry counts. A `blocked` worker with confirmation markers triggers a human notice immediately; other stops trigger one after delivery to the lead or two consecutive observations. Failed human notices retry while the stop persists, giving up after three failures. Suppresses workers waiting for background shells (`· N shell` in the footer) and transient `blocked` states without confirmation markers. Also detects exited agents whose panes remain. Defers lead delivery during `working` / `blocked` or a detected Claude Code question screen, without marking the notice as sent. Re-reads the lead by name immediately before sending; failed reads also defer delivery. Replaces a watcher for a different lead in the same workspace. Exits when the workspace closes or the lead disappears. PID, log, and first-observation readiness files live in `~/.local/state/agent-graph/<workspace_id>/`. `--ready` only checks the live watcher; it never starts or replaces one. `--ensure` starts or reuses this lead's watcher and refuses to replace a live watcher belonging to another lead. |
+| `scripts/merge-issue.sh` | `merge-issue.sh --project <checkout> --issue <number> --operation merge --requested-issue <number> [--check]` | On an explicit human request only, checks this operator's linked PR, current-head administrator approval, and required CI. The calling skill interprets the request in the operator's language and binds its Issue number. Preview is read-only; the write rechecks gates and pins the head SHA. See [merge.md](../take-issue/references/merge.md). |
+| `scripts/pr.sh` | `pr.sh --title <title> --body-file <absolute-path> [--gh-user <account>] [--reviewer <account>] [--base main] [--draft]` | Requires a clean worktree, pushes, creates a ready PR, and prints its URL. Resolves authentication once and pins the token for gh operations and HTTPS GitHub pushes. Without `--gh-user`, uses the environment token's owner or gh's active account. Optional `--reviewer` requests the configured reviewer on a new or reused PR. Reuses an existing open PR for the branch and base, promoting a draft to ready unless `--draft` is requested. |
 | `scripts/review.sh` | `review.sh [--uncommitted] [--base <branch>] [--out <file>]` | Runs `codex exec review` against the merge-base with `origin/<base>` (default `main`) and prints the output file path. |
 
 - Watcher notices include the agent name, pane ID, tab label, status, classification (permission request / awaiting confirmation / stopped), and the last eight pane lines. They say "stopped" rather than "completed", because the worker may be waiting after a rejected confirmation. Read the report file when present; otherwise inspect the pane.
@@ -73,6 +77,7 @@ Workers continue writing to their assigned report paths after handoff. The watch
 
 | File | Contents |
 |---|---|
+| [start.md](references/start.md) | Receipt-based worker launch, result JSON, and safe resumption |
 | [launch.md](references/launch.md) | Launch arguments for Claude Code, Codex, agy, and Pi; how to look up models and reasoning levels |
 | [herdr.md](references/herdr.md) | Tabs, agent operations, confirmations, and status semantics |
 | [messaging.md](references/messaging.md) | Instructions, reports, and communication with other Epic leads |

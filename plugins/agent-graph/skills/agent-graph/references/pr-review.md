@@ -3,7 +3,7 @@
 Implement → test → review with Claude Code and Codex → create the PR.
 
 1. **Implement and test.** Run local tests and the validation required by the repository, then make the worktree clean.
-2. **Claude Code review.** Use the built-in `/code-review`; this skill provides no wrapper.
+2. **Claude Code review.** Use the built-in `/code-review` and `/simplify`, resolve accepted findings, and rerun affected checks; this skill provides no wrapper for either command. Other harnesses use their native review and an explicit simplification pass.
 3. **Codex review.** Run `bash <skill-directory>/scripts/review.sh`, read the resulting file, and resolve findings. Use `--uncommitted` for changes that have not been committed.
 4. After fixing findings, rerun the tests from step 1 and confirm they pass.
 5. **Create the PR.** Run `bash <skill-directory>/scripts/pr.sh --title "<title>" --body-file <absolute-path> [--gh-user <account>]`. The default is ready; pass `--draft` only when a draft is wanted. Without `--gh-user`, the script resolves the environment token's owner or gh's active account once, then pins that token for gh operations and HTTPS GitHub pushes.
@@ -26,3 +26,7 @@ codex exec review "Review the diff against main for <criteria>"
 - `codex review` / `codex exec review` starts with `sandbox: read-only` without needing an explicit setting.
 - Use `-o <file>` to save only the final response. Standard output may show the response twice; the output file avoids that duplication.
 - To review a plan, pass its path for Codex to read: `codex exec -s read-only "Review the plan at <path>"`.
+
+## Assigned Issue handoff
+
+The [take-issue entry](../../take-issue/SKILL.md) has the worker review and simplify before reporting, and the lead creates the PR with the configured administrator reviewer (`pr.sh --reviewer <login>`). The administrator can perform additional review on another machine before approving on GitHub. Merge entry requires a separate explicit human request and fresh approval/CI checks; PR creation never implies merge authorization.

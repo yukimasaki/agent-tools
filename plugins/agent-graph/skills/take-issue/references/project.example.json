@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "project": "demo",
+  "repo": "example/demo",
+  "base": "main",
+  "branch_template": "{type}/{number}{suffix}",
+  "worktree_root": "../demo-worktrees",
+  "prepare": "scripts/prepare-worktree.sh",
+  "required_checks": [
+    "typecheck",
+    "lint",
+    "unit",
+    "build"
+  ],
+  "merge_method": "squash"
+}

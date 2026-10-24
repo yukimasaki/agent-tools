@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # agent-graph pr — push, create a ready PR, and print its URL.
-# Usage: pr.sh --title <title> --body-file <absolute-path> [--gh-user <account>]
+# Usage: pr.sh --title <title> --body-file <absolute-path> [--gh-user <account>] [--reviewer <account>]
 #              [--base main] [--draft]
 # Resolve authentication once, without switching gh's machine-wide active user.
 # Pin the token for gh operations and HTTPS GitHub pushes so another session's
@@ -9,21 +9,22 @@ set -uo pipefail
 
 die() { echo "agent-graph pr: $*" >&2; exit 1; }
 
-TITLE=""; BODY_FILE=""; GH_USER=""; BASE="main"; DRAFT=false
+TITLE=""; BODY_FILE=""; GH_USER=""; REVIEWER=""; BASE="main"; DRAFT=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --title|--body-file|--gh-user|--base)
+    --title|--body-file|--gh-user|--reviewer|--base)
       [[ $# -ge 2 ]] || die "$1 requires a value"
       case "$1" in
         --title) TITLE="$2" ;;
         --body-file) BODY_FILE="$2" ;;
         --gh-user) GH_USER="$2"; [[ -n "$GH_USER" ]] || die "--gh-user requires a nonempty account" ;;
+        --reviewer) REVIEWER="$2"; [[ "$REVIEWER" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || die "invalid --reviewer account" ;;
         --base) BASE="$2" ;;
       esac
       shift 2 ;;
     --draft) DRAFT=true; shift ;;
     -h|--help)
-      echo "Usage: pr.sh --title <title> --body-file <absolute-path> [--gh-user <account>] [--base main] [--draft]"
+      echo "Usage: pr.sh --title <title> --body-file <absolute-path> [--gh-user <account>] [--reviewer <account>] [--base main] [--draft]"
       exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -79,6 +80,9 @@ EXISTING="$LIST_OUT"
 if [[ -n "$EXISTING" ]]; then
   EXISTING_URL="${EXISTING%% *}"
   echo "PR already exists (push applied): $EXISTING_URL" >&2
+  if [[ -n "$REVIEWER" ]]; then
+    ghx pr edit "$EXISTING_URL" --add-reviewer "$REVIEWER" >&2 || die "cannot request configured reviewer: $EXISTING_URL"
+  fi
   if [[ "${EXISTING##* }" == true ]] && ! $DRAFT; then
     ghx pr ready "$EXISTING_URL" >&2 || die "cannot mark draft PR ready: $EXISTING_URL"
     echo "marked draft PR ready" >&2
@@ -88,6 +92,7 @@ if [[ -n "$EXISTING" ]]; then
 fi
 
 args=(pr create --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$BODY_FILE")
+[[ -z "$REVIEWER" ]] || args+=(--reviewer "$REVIEWER")
 $DRAFT && args+=(--draft)
 OUT="$(ghx "${args[@]}" 2>&1)" || die "PR creation failed: $OUT"
 URL="$(grep -Eo 'https://[^[:space:]]+/pull/[0-9]+' <<<"$OUT" | tail -1)"
