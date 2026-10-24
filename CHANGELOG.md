@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.5](https://github.com/yukimasaki/agent-tools/compare/v0.1.4...v0.1.5) (2026-10-24)
+
+
+### Features
+
+* **agent-graph:** Issue番号から作業開始と承認済みPRのマージを行う ([#15](https://github.com/yukimasaki/agent-tools/issues/15)) ([81c302e](https://github.com/yukimasaki/agent-tools/commit/81c302e32cc6cfd9eeb3aff126b4f34895676a54))
+
+
+### Bug Fixes
+
+* **agent-graph:** 起動直後の折り返した足元を見分け、見分けられない画面は少し待つ ([#18](https://github.com/yukimasaki/agent-tools/issues/18)) ([1b1fb06](https://github.com/yukimasaki/agent-tools/commit/1b1fb06577ffbb3205e11fa2e09409c660e4892b))
+
 ## [0.1.4](https://github.com/yukimasaki/agent-tools/compare/v0.1.3...v0.1.4) (2026-10-09)
 
 
