@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/yukimasaki/agent-tools/compare/v0.1.5...v0.1.6) (2026-10-25)
+
+
+### Features
+
+* **agent-graph:** OpenCode の作業役の起動と受け取りの確かめに対応する ([#20](https://github.com/yukimasaki/agent-tools/issues/20)) ([10dfee6](https://github.com/yukimasaki/agent-tools/commit/10dfee6e2619f6023e3548408d004a98bbb36a61))
+
 ## [0.1.5](https://github.com/yukimasaki/agent-tools/compare/v0.1.4...v0.1.5) (2026-10-24)
 
 
