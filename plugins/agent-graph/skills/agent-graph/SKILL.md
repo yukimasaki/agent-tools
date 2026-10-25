@@ -2,7 +2,7 @@
 name: agent-graph
 description: 'Use /agent-graph to coordinate agents in herdr, promote or hand off a lead, start workers, or contact another Epic lead. Triggers include 「lead に昇格して」「新しい lead に引き継いで」「作業役を立てて」「別の Epic の lead に連絡して」. Provides naming, handoff, stop monitoring, PR creation, Codex review, and harness launch procedures; excludes review criteria and model rankings.'
 metadata:
-  agent-tools-agents: 'claude codex pi'
+  agent-tools-agents: 'claude codex pi opencode'
 ---
 
 # agent-graph

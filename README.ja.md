@@ -2,7 +2,7 @@
 
 # agent-tools
 
-[herdr](https://herdr.dev) の上で **コーディングエージェントのグラフ** を動かすための道具集です。ワークスペースごとに 1 人の指揮役（lead）を置き、別のタブの作業役をまとめます。スキルは **Claude Code・Codex・Pi** で使えます。
+[herdr](https://herdr.dev) の上で **コーディングエージェントのグラフ** を動かすための道具集です。ワークスペースごとに 1 人の指揮役（lead）を置き、別のタブの作業役をまとめます。スキルは **Claude Code・Codex・Pi・OpenCode** で使えます。
 
 - **agent-graph** — 命名、lead の昇格と引き継ぎ、作業役が止まったら lead を起こす監視、PR と Codex のレビューの小さな道具
 - **memgate** — 並行して動く多数のエージェントがマシンのメモリを使い切らないようにする。重い起動の前の gate、同時実行の上限、調整役のエージェントへの知らせ
@@ -52,8 +52,8 @@ Pi は `package.json` の `pi.skills` に列挙したスキル（Pi で動作を
 
 | スキル | 確認済み | 内容 |
 |---|---|---|
-| `agent-graph` | Claude Code、Codex、Pi | lead と作業役の命名、lead の昇格と引き継ぎ、`watch.sh`（作業役が止まったり承認待ちになったりしたら lead を起こす）、`start.sh`（タブの作成から最初の指示の受付確認まで）、`pr.sh`、`review.sh`、claude・codex・agy・Pi の起動引数 |
-| `take-issue` | Claude Code | 「#N を取得して」から既存 workspace の作業タブを起動し、「#N をマージして」で本人の PR の管理者 Approve と必須 CI を確認して取り込む |
+| `agent-graph` | Claude Code、Codex、Pi、OpenCode | lead と作業役の命名、lead の昇格と引き継ぎ、`watch.sh`（作業役が止まったり承認待ちになったりしたら lead を起こす）、`start.sh`（タブの作成から最初の指示の受付確認まで）、`pr.sh`、`review.sh`、claude・codex・agy・Pi・OpenCode の起動引数 |
+| `take-issue` | Claude Code、OpenCode の起動 | 「#N を取得して」から既存 workspace の作業タブを起動し、「#N をマージして」で本人の PR の管理者 Approve と必須 CI を確認して取り込む |
 
 ### memgate プラグイン
 
@@ -69,7 +69,7 @@ agent-graph の [`start.sh`](plugins/agent-graph/skills/agent-graph/references/s
 
 ## Issue 番号から始める
 
-`/agent-graph:take-issue` または「#42 を取得して」で、事前に担当を割り当てた Issue の作業を始めます。管理者は [入口の設定](plugins/agent-graph/skills/take-issue/references/setup.md) を先に行います。入口は既存 workspace にタブを足し、Issue ごとに workspace を増やしません。PR 前にはレビューと簡素化を行い、設定済み管理者へレビューを依頼します。「#42 をマージして」は、その利用者本人の PR だけを、最新コミットへの管理者の Approve と必須 CI を確認して取り込みます。ハーネスの追加確認が残る場合は、利用者の言語で対象と操作を案内します。英語の「Merge #42」など、ほかの言語の明示的な依頼も同じ入口で扱います。OpenCode は手動の控えとして扱います。
+`/agent-graph:take-issue` または「#42 を取得して」で、事前に担当を割り当てた Issue の作業を始めます。管理者は [入口の設定](plugins/agent-graph/skills/take-issue/references/setup.md) を先に行います。入口は既存 workspace にタブを足し、Issue ごとに workspace を増やしません。PR 前にはレビューと簡素化を行い、設定済み管理者へレビューを依頼します。「#42 をマージして」は、その利用者本人の PR だけを、最新コミットへの管理者の Approve と必須 CI を確認して取り込みます。ハーネスの追加確認が残る場合は、利用者の言語で対象と操作を案内します。英語の「Merge #42」など、ほかの言語の明示的な依頼も同じ入口で扱います。OpenCode は [専用の設定](plugins/agent-graph/skills/take-issue/references/setup.md#opencode-leads-and-workers)後に Issue の準備と作業役の受領確認まで使えます。herdr が状態を読み違えるため、lead は報告ファイルを待ちます。OpenCode での PR・マージは未検証です。
 
 ## 設定
 

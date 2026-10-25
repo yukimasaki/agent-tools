@@ -54,7 +54,7 @@ elif a[:2]==['agent','start']:
 elif a[:2]==['pane','process-info']:
  emit(process_info={'foreground_process_group_id':int(os.environ.get('GROUP_PID','999999999')),'shell_pid':1})
 elif a[:2]==['agent','read']:
- if mode=='ack_after_idle_render' and d.get('prompted'):
+ if mode in ('ack_after_idle_render', 'opencode_receipt_busy') and d.get('prompted'):
   d['receipt_reads']=d.get('receipt_reads',0)+1
   if d['receipt_reads']>=2:
    Path(d['receipt']).write_text(json.dumps({'run_id':'test-run','brief_sha256':hashlib.sha256(Path(d['brief']).read_bytes()).hexdigest()}))
@@ -72,6 +72,21 @@ elif a[:2]==['agent','read']:
  elif mode=='wrapped_effort':print('❯ Try "edit index.html to..."\n'+'─'*75+'\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n'+' '*55+'◐ medium · /effort')
  elif mode=='not_logged_in':print('❯\n'+'─'*75+'\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n'+' '*41+'Not logged in · Run /login')
  elif mode=='late_ready':d['late_reads']=d.get('late_reads',0)+1;save();print('❯ ' if d['late_reads']>3 else 'An unfamiliar screen')
+ elif mode.startswith('opencode_'):
+  # Observed OpenCode 2.1.4, 111x69 and 56x69. Initial input is centered.
+  field='┃  Ask anything… "What is the tech stack of this project?"'
+  if mode=='opencode_narrow':field='┃  Ask anything… "What is the tech stack of this'
+  if mode=='opencode_empty':field='┃'
+  if mode=='opencode_typed':field='┃  draft instructions'
+  screen='\n'*34+'┃\n'+field+'\n┃\n┃  Build auto · DeepSeek V4.1 Flash Free OpenCode\n╹'+'▀'*50+'\n/ DeepSeek V4.1 Flash Free | ctx (200K) --%  shift+t'
+  if mode=='opencode_wide':screen+='ab agents  ctrl+p commands\n'+'\n'*25+'2.1.4'
+  if mode=='opencode_reasoning':screen=screen.replace('DeepSeek V4.1 Flash Free OpenCode', 'GLM-5.3-Flash Free OpenCode · high')
+  if mode=='opencode_busy':screen=screen.replace('/ DeepSeek','⬝⬝esc interrupt DeepSeek')
+  if mode=='opencode_receipt_busy' and d.get('prompted'):screen=screen.replace('/ DeepSeek','⬝⬝esc interrupt DeepSeek')
+  if mode=='opencode_shell':screen+=' ↓ 1 shell'
+  if mode=='opencode_historical':screen+='\nPermission required\nAllow once'
+  if mode=='opencode_unknown_footer':screen+='\nUnknown current menu'
+  print(screen)
  else:print('› ' if d['agent']['agent']=='codex' else '❯ ')
 elif a[:2]==['agent','rename']:
  d['agent']['name']=a[3];emit(agent=d['agent'])
@@ -79,7 +94,7 @@ elif a[:2]==['agent','prompt']:
  d['prompted']=True
  receipt={'run_id':'test-run','brief_sha256':hashlib.sha256(Path(d['brief']).read_bytes()).hexdigest()}
  if mode=='wrong_receipt':receipt['run_id']='old-run'
- if mode not in ('pending','pending_lost','session_change','ack_after_idle_render'):
+ if mode not in ('pending','pending_lost','session_change','ack_after_idle_render','opencode_receipt_busy'):
   dest=Path(d['receipt']);tmp=dest.with_suffix('.tmp');tmp.write_text(json.dumps(receipt));tmp.replace(dest)
  if mode=='session_change':d['agent']['agent_session']['value']='session-two'
  if mode=='late_session':d['agent']['agent_session']={'kind':'id','value':'session-after-first-prompt'}
@@ -174,6 +189,37 @@ class StartupTests(unittest.TestCase):
         start=self.calls('agent start')[0]
         self.assertEqual(start[start.index('--kind')+1], 'codex')
         self.assertEqual(start[start.index('--')+1:], ['-m','fixture-model'])
+
+    def test_opencode_live_input_contract_and_receipt(self):
+        for mode in ('opencode_wide', 'opencode_narrow', 'opencode_empty', 'opencode_reasoning'):
+            with self.subTest(mode=mode):
+                self.set(mode=mode, calls=[], agent=None)
+                Path(str(self.receipt)+'.start.jsonl').unlink(missing_ok=True)
+                self.receipt.unlink(missing_ok=True)
+                self.assertEqual(self.run_start('--kind', 'opencode', native=['--auto'])[0], 0)
+                self.assertEqual(len(self.calls('agent prompt')), 1)
+                self.assertIn('visible', self.calls('agent read')[0])
+                self.assertEqual(self.run_start('--kind', 'opencode', '--pane', 'w1:p7', native=['--auto'])[0], 0)
+                self.assertEqual(len(self.calls('agent prompt')), 1)
+
+    def test_opencode_drafts_busy_and_historical_boxes_are_not_ready(self):
+        for mode in ('opencode_typed', 'opencode_busy', 'opencode_shell',
+                     'opencode_historical', 'opencode_unknown_footer'):
+            with self.subTest(mode=mode):
+                self.set(mode=mode, calls=[], agent=None)
+                Path(str(self.receipt)+'.start.jsonl').unlink(missing_ok=True)
+                self.assertEqual(self.run_start('--kind', 'opencode', '--ready-grace', '0')[0], 5)
+                self.assertFalse(self.calls('agent prompt'))
+
+    def test_opencode_busy_receipt_wait_and_confirmation(self):
+        self.set(mode='opencode_receipt_busy')
+        self.assertEqual(self.run_start('--kind', 'opencode')[0], 0)
+        self.assertEqual(len(self.calls('agent prompt')), 1)
+        Path(str(self.receipt)+'.start.jsonl').unlink()
+        self.receipt.unlink()
+        self.set(mode='trust', calls=[], agent=None)
+        self.assertEqual(self.run_start('--kind', 'opencode')[0], 4)
+        self.assertFalse(self.calls('agent prompt'))
 
     def test_live_claude_startup_placeholder_is_an_empty_input(self):
         self.set(mode='placeholder')

@@ -80,11 +80,12 @@ herdr agent start <name> --kind opencode --pane "$PANE" -- --auto --prompt "<ini
 ```
 
 - Look up model IDs with `opencode models` (`<provider>/<model-id>`). The listing shows no reasoning levels or context limits.
-- **The interactive TUI has no `--model` option** (verified on opencode v2.0.31). `--model <provider>/<model>#<variant>` exists only on `opencode run`. Pin the model with an `opencode.json` in the worker's directory: `{ "model": "<provider>/<model-id>" }`. Exclude it from git in `$(git rev-parse --git-common-dir)/info/exclude`; inside a worktree `.git` is a file, so `.git/info/exclude` fails. Tell the worker not to commit it.
+- **The interactive TUI has no `--model` option** (verified on opencode v2.1.4). `--model <provider>/<model>#<variant>` exists only on `opencode run`. Pin the model with an `opencode.json` in the worker's directory: `{ "model": "<provider>/<model-id>" }`. Exclude it from git in `$(git rev-parse --git-common-dir)/info/exclude`; inside a worktree `.git` is a file, so `.git/info/exclude` fails. Tell the worker not to commit it.
 - `--auto` approves permissions that are not explicitly denied. `--prompt` sends the initial instructions.
-- The footer shows the agent, permission mode, and model (`Build auto · <model name>`) and the context usage at the bottom right (`126.1K (63%)`). No reasoning level is shown.
+- The footer shows the agent, permission mode, and model (`Build auto · <model name>`) and the context usage at the bottom right (`126.1K (63%)`). Some models show a reasoning label after the provider, such as `OpenCode · high`; verify the actual display.
 - `~/.config/opencode/service.json` holds the background server's password in plain text. Do not print it while inspecting the configuration.
-- **herdr misreports opencode status and does not name it on start.** See [pitfalls.md](pitfalls.md). Wait for the report file instead of the watcher.
+- Use `start.sh --kind opencode` for receipt-based delivery. It waits for the observed input box and repairs an unnamed matching agent after a startup timeout. Do not pass `--prompt` to `start.sh`; put instructions in `--brief`.
+- **herdr can misreport OpenCode status.** Use the report-file wait in [pitfalls.md](pitfalls.md), including after a watcher notice. See [OpenCode setup](../../take-issue/references/setup.md#opencode-leads-and-workers) for skill installation and model approval.
 
 ## Verify after launch
 

@@ -60,8 +60,49 @@ Use a new `--run-id` only after inspecting the prior work and agent. A new run d
 
 Name the concern lead before normal use. Use `watch.sh --ensure <lead-name>` to start or reuse that workspace's watcher without replacing another lead's watcher. `watch.sh --ready <lead-name>` is a read-only check of the current PID, process start time, lead, and successful first observation. An old watcher without a matching readiness record needs its owner to restart it; readiness never starts or replaces a watcher.
 
-Test in a dedicated workspace: enter an assigned number, verify preparation, receipt, report, and the stop notice. Then remove only the test's worktree, tabs, watcher, and temporary files. Cross-machine automation is outside scope. For acceptance on another machine, use Claude Code as the baseline. OpenCode stays a fallback with its documented state-detection limitations.
+Test in a dedicated workspace: enter an assigned number, verify preparation, receipt, report, and the stop notice. Then remove only the test's worktree, tabs, watcher, and temporary files. Cross-machine automation is outside scope. Repeat acceptance on each target machine. OpenCode startup and receipt are supported; its stop monitoring still requires the report-file wait below.
 
 ## Operator merge entry
 
 Configure the administrator reviewer, required CI names, and project merge method before the normal two-command workflow. See [merge.md](merge.md) for explicit requests in the operator's language, such as `Merge #N` or `#N をマージして`, current-head approval, own-account PR restriction, and additional harness confirmations.
+
+
+## OpenCode leads and workers
+
+OpenCode 2.1.4 can load this skill and launch an OpenCode worker through `start.sh`. Install real copies of both sibling directories from the same plugin version:
+
+```text
+<skill-root>/
+  take-issue/SKILL.md
+  take-issue/references/...
+  agent-graph/SKILL.md
+  agent-graph/scripts/...
+  agent-graph/references/...
+```
+
+Copy the entire directories, including scripts and references. `take-issue` resolves `../agent-graph`; copying only its `SKILL.md` breaks preparation and startup. Replace both copies together after upgrading the plugin. A plugin cache directory alone is not an OpenCode search path. A symlink-only installation failed in the live test; use real copies and verify discovery.
+
+The [OpenCode skills reference](https://dev.opencode.ai/v2/docs/skills/) lists `.opencode/skills`, `.agents/skills`, and `.claude/skills` as project sources. Global sources include `~/.config/opencode/skills`, `~/.agents/skills`, and `~/.claude/skills`. An explicit source avoids relying on cache discovery:
+
+```json
+{
+  "model": "<provider>/<approved-lead-model>",
+  "skills": ["~/.config/opencode/skills"]
+}
+```
+
+The `skills` array points to the parent containing both skill directories. Relative entries resolve from the active working directory, so use a home-relative or absolute source for linked worktrees. Load `@take-issue` and confirm its base directory before entering `Start #42`. If discovery fails, provide the copied `SKILL.md` path and have the lead read it.
+
+### Approve the effective OpenCode configuration
+
+The launch hash continues to cover only the exact `launch` object. It does not cover `opencode.json`, `opencode.jsonc`, inherited user configuration, or server state. Hashing a single project file would imply coverage of an effective configuration that can also depend on other sources. The helper does not resolve OpenCode's configuration merge rules.
+
+For an OpenCode profile, the administrator must separately approve the lead and worker models and effective permission settings. Record that approval outside the repository with the machine profile. Use `launch.kind: "opencode"` and an approved argument array, usually `[]`; `--auto` requires explicit approval. Do not put `--model` in interactive arguments. The project preparation script must create the approved worker `opencode.json` in each worktree and stop on an existing conflicting file. Exclude the file from git using the common git directory's `info/exclude`.
+
+Before startup, the lead compares the generated worker configuration with the approved configuration and checks applicable inherited configuration. After startup, the lead reads the actual model and permission display. A different or unavailable display stops acceptance of the launch and requires inspection. Receipt alone certifies neither model nor permissions. A configuration change requires administrator review even if `approval.launch_sha256` still matches. Do not infer approval from a recomputed hash.
+
+### Wait for an OpenCode report
+
+Keep the ordinary watcher for workspace readiness, but treat OpenCode status notices as prompts to inspect. They cannot certify completion. After a confirmed receipt, use the bounded report-file wait in [pitfalls.md](../../agent-graph/references/pitfalls.md#herdr-reports-a-working-opencode-as-done). Inspect the report and actual pane before reporting the result. This also applies to an OpenCode lead: herdr can misread its working state, so avoid sending notices into a lead that is still handling the request. Issue #13 tracks the remaining watcher work.
+
+For acceptance, use a disposable local repository and a fake `gh` that allows only identity and Issue reads. Verify `Start #N`, receipt, worker report, and the lead reading that report. Never run the PR handoff in this fixture. Remove its watcher, tabs, worktrees, and temporary files afterward.

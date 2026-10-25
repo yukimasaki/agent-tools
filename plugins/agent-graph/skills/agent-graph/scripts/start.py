@@ -23,6 +23,28 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
+def opencode_ready(text):
+    # OpenCode 2.1.4 centers its first input. On narrow panes the placeholder
+    # and footer are clipped. Match the final input box, including its footer.
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    borders = [i for i, line in enumerate(lines) if re.fullmatch(r"╹▀+", line)]
+    if not borders:
+        return False
+    end = borders[-1]
+    start = end - 1
+    while start >= 0 and lines[start].startswith("┃"):
+        start -= 1
+    box = lines[start + 1:end]
+    footer = lines[end + 1:]
+    return (len(box) == 4 and box[0] == box[2] == "┃" and
+            (box[1] == "┃" or box[1].startswith('┃  Ask anything… "')) and
+            re.fullmatch(r"┃\s+Build(?: auto)? · .+ OpenCode(?: · \S+)?", box[3]) is not None and
+            1 <= len(footer) <= 2 and
+            re.fullmatch(r"/.*\S.*\| ctx \([^)]+\) .*", footer[0]) is not None and
+            (len(footer) == 1 or re.fullmatch(r"\d+\.\d+\.\d+", footer[1]) is not None) and
+            not re.search(r"esc interrupt|↓\s*\d+\s+shell", footer[0]))
+
+
 def arguments():
     if sys.version_info < (3, 11):
         raise Stop(2, "invalid", "Python 3.11 or newer is required")
@@ -191,7 +213,8 @@ class Launch:
             return False
 
     def screen(self, agent, *, readiness=True, may_wait=True):
-        text = self.command("agent", "read", self.info["pane"], "--lines", "20", json_output=False)
+        read_args = ("--source", "visible", "--lines", "200") if self.args.kind == "opencode" else ("--lines", "20")
+        text = self.command("agent", "read", self.info["pane"], *read_args, json_output=False)
         tail = "\n".join(line for line in text.splitlines() if line.strip())
         if (agent.get("agent_status") == "blocked" or
                 re.search(r"(?im)^\s*(?:Enter to (?:select|confirm).*Esc to cancel|Esc to cancel|Do you (?:want to proceed|trust)|.*trust (?:this|the) (?:folder|directory)|.*trust the files|.*update.*(?:now|available)|❯\s*[1-9]\.)", tail)):
@@ -215,6 +238,8 @@ class Launch:
                                 (self.args.kind == "claude" and re.fullmatch(r'❯\s+Try "[^"\n]*"', line.strip())))
                                and all(footer.fullmatch(rest) for rest in lines[i + 1:])
                                for i, line in enumerate(lines))
+        if self.args.kind == "opencode":
+            ready = opencode_ready(text)
         if not ready:
             if not may_wait:
                 raise Stop(5, "unverified", "input screen is unrecognized; inspect it manually")

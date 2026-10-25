@@ -80,20 +80,24 @@ After a timeout, read the pane (`herdr pane read <pane> --lines 30`) before retr
 
 With opencode v2.0.31, herdr reported `done` about three minutes after start while opencode kept working for another 25 minutes. `state_change_seq` did not change across repeated reads. The watcher sent a false stop notice and then could not detect the real end, because the status never left `done`.
 
-For opencode workers, do not rely on the watcher. Wait for the report file in the lead, and treat the worker as stalled when the context usage at the bottom right of the footer (`135.7K (68%)`) stays unchanged for about ten minutes:
+OpenCode 2.1.4 also showed an empty input box while a shell was running; the footer contained `esc interrupt` and `↓ 1 shell`. A short test completing correctly does not resolve the older long-running failure. Issue #13 tracks the watcher fix. Screen stillness alone cannot distinguish completion from a stalled model or a quiet long-running tool.
+
+For OpenCode workers, wait for the assigned report instead of relying on a status transition. Require a new report path for each run and verify that no report exists before launching. After receipt, run a bounded wait in the lead:
 
 ```bash
-R=<report-path>; prev=""; same=0
-while [ ! -f "$R" ]; do
-  cur=$(herdr pane read <pane> --lines 2 | tail -1 | grep -oE '[0-9.]+K \([0-9]+%\)')
-  if [ "$cur" = "$prev" ]; then same=$((same+1)); else same=0; prev=$cur; fi
-  [ $same -ge 20 ] && { echo "stalled at $cur"; exit 0; }
-  sleep 30
+R=<report-path>
+for attempt in {1..30}; do
+  if [ -s "$R" ]; then
+    printf 'report ready: %s\n' "$R"
+    break
+  fi
+  sleep 2
 done
-echo "report: $R"
 ```
 
-A watcher fix would recognize `agent` = `opencode` and judge the end from the report file and footer changes instead of `agent_status`. It is not implemented.
+Read the report when present, then inspect the pane to confirm the worker ended its turn. If the report is absent after a minute, inspect the worker and repeat the bounded wait while work continues. A timeout means the report is unavailable, not that the task finished. An early watcher notice must not cancel this wait. Stop only the watcher and panes created for a disposable acceptance test.
+
+The generic watcher has no report-path contract and can also misread an OpenCode lead. Correcting worker and lead status handling needs separate long-running acceptance, including permissions and quiet shells. This remains outside the startup screen fix.
 
 ## Unverified behavior
 
