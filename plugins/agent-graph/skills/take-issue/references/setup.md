@@ -66,7 +66,6 @@ Test in a dedicated workspace: enter an assigned number, verify preparation, rec
 
 Configure the administrator reviewer, required CI names, and project merge method before the normal two-command workflow. See [merge.md](merge.md) for explicit requests in the operator's language, such as `Merge #N` or `#N をマージして`, current-head approval, own-account PR restriction, and additional harness confirmations.
 
-
 ## OpenCode leads and workers
 
 OpenCode 2.1.4 can load this skill and launch an OpenCode worker through `start.sh`. Install real copies of both sibling directories from the same plugin version:

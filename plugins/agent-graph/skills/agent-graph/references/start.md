@@ -51,7 +51,6 @@ Before submitting instructions, the automated startup screen check requires a cu
 
 A timeout covers startup, observation, and receipt waiting together. Inspect the actual model and reasoning after launch as required by [launch.md](launch.md). The receipt does not certify that the requested model was selected. The helper does not change permissions, answer trust questions, install updates, or silently switch engines.
 
-
 ### OpenCode input contract
 
 With `--kind opencode`, the helper reads up to 200 lines of the visible viewport. OpenCode centers its initial input, so the last 20 lines can contain only blank space and a version number. Live checks used 111-column and 56-column panes, both 69 rows high.
