@@ -216,8 +216,12 @@ class Launch:
         read_args = ("--source", "visible", "--lines", "200") if self.args.kind == "opencode" else ("--lines", "20")
         text = self.command("agent", "read", self.info["pane"], *read_args, json_output=False)
         tail = "\n".join(line for line in text.splitlines() if line.strip())
+        # OpenCode's full viewport includes conversation and tool output.
+        # Its dialog markers are unverified: use blocked for confirmations,
+        # and keep the separate input contract below for safe delivery.
         if (agent.get("agent_status") == "blocked" or
-                re.search(r"(?im)^\s*(?:Enter to (?:select|confirm).*Esc to cancel|Esc to cancel|Do you (?:want to proceed|trust)|.*trust (?:this|the) (?:folder|directory)|.*trust the files|.*update.*(?:now|available)|❯\s*[1-9]\.)", tail)):
+                (self.args.kind != "opencode" and
+                 re.search(r"(?im)^\s*(?:Enter to (?:select|confirm).*Esc to cancel|Esc to cancel|Do you (?:want to proceed|trust)|.*trust (?:this|the) (?:folder|directory)|.*trust the files|.*update.*(?:now|available)|❯\s*[1-9]\.)", tail))):
             raise Stop(4, "needs_confirmation", "inspect the trust, update, or permission screen; no answer was sent")
         if not readiness:
             return False

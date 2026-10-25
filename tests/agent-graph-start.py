@@ -54,7 +54,7 @@ elif a[:2]==['agent','start']:
 elif a[:2]==['pane','process-info']:
  emit(process_info={'foreground_process_group_id':int(os.environ.get('GROUP_PID','999999999')),'shell_pid':1})
 elif a[:2]==['agent','read']:
- if mode in ('ack_after_idle_render', 'opencode_receipt_busy') and d.get('prompted'):
+ if mode in ('ack_after_idle_render', 'opencode_receipt_busy', 'opencode_receipt_conversation') and d.get('prompted'):
   d['receipt_reads']=d.get('receipt_reads',0)+1
   if d['receipt_reads']>=2:
    Path(d['receipt']).write_text(json.dumps({'run_id':'test-run','brief_sha256':hashlib.sha256(Path(d['brief']).read_bytes()).hexdigest()}))
@@ -86,6 +86,8 @@ elif a[:2]==['agent','read']:
   if mode=='opencode_shell':screen+=' ↓ 1 shell'
   if mode=='opencode_historical':screen+='\nPermission required\nAllow once'
   if mode=='opencode_unknown_footer':screen+='\nUnknown current menu'
+  if mode=='opencode_past_confirmation' or (mode=='opencode_receipt_conversation' and d.get('prompted')):
+   screen='A dependency update is available\nDo you trust this folder?\nEnter to confirm · Esc to cancel\n'+screen
   print(screen)
  else:print('› ' if d['agent']['agent']=='codex' else '❯ ')
 elif a[:2]==['agent','rename']:
@@ -94,7 +96,7 @@ elif a[:2]==['agent','prompt']:
  d['prompted']=True
  receipt={'run_id':'test-run','brief_sha256':hashlib.sha256(Path(d['brief']).read_bytes()).hexdigest()}
  if mode=='wrong_receipt':receipt['run_id']='old-run'
- if mode not in ('pending','pending_lost','session_change','ack_after_idle_render','opencode_receipt_busy'):
+ if mode not in ('pending','pending_lost','session_change','ack_after_idle_render','opencode_receipt_busy','opencode_receipt_conversation'):
   dest=Path(d['receipt']);tmp=dest.with_suffix('.tmp');tmp.write_text(json.dumps(receipt));tmp.replace(dest)
  if mode=='session_change':d['agent']['agent_session']['value']='session-two'
  if mode=='late_session':d['agent']['agent_session']={'kind':'id','value':'session-after-first-prompt'}
@@ -220,6 +222,19 @@ class StartupTests(unittest.TestCase):
         self.set(mode='trust', calls=[], agent=None)
         self.assertEqual(self.run_start('--kind', 'opencode')[0], 4)
         self.assertFalse(self.calls('agent prompt'))
+
+    def test_opencode_past_confirmation_text_above_current_input(self):
+        self.set(mode='opencode_past_confirmation')
+        rc, out = self.run_start('--kind', 'opencode')
+        self.assertEqual((rc, out['result']), (0, 'started'))
+        self.assertEqual(len(self.calls('agent prompt')), 1)
+
+    def test_opencode_receipt_wait_ignores_conversation_confirmation_text(self):
+        self.set(mode='opencode_receipt_conversation')
+        rc, out = self.run_start('--kind', 'opencode')
+        self.assertEqual((rc, out['result']), (0, 'started'))
+        self.assertEqual(len(self.calls('agent prompt')), 1)
+        self.assertGreaterEqual(json.loads(self.fixture.read_text())['receipt_reads'], 2)
 
     def test_live_claude_startup_placeholder_is_an_empty_input(self):
         self.set(mode='placeholder')
