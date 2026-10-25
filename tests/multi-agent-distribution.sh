@@ -3,7 +3,7 @@
 # distributed.
 #
 # Each SKILL.md records the agents it has been verified with in
-# `metadata.agent-tools-agents` (a space-separated subset of "claude codex pi").
+# `metadata.agent-tools-agents` (a space-separated subset of "claude codex pi opencode").
 # From that flag:
 # - Claude-only skills carry `compatibility: 'Designed for Claude Code'`;
 #   other skills must not.
@@ -28,7 +28,7 @@ import yaml
 
 root = Path(sys.argv[1]).resolve()
 errors = []
-KNOWN = {"claude", "codex", "pi"}
+KNOWN = {"claude", "codex", "pi", "opencode"}
 
 def check(condition, message):
     print(("ok " if condition else "not ok ") + message)

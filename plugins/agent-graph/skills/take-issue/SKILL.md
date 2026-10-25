@@ -1,12 +1,13 @@
 ---
 name: take-issue
 description: 'Start an assigned GitHub Issue or merge its approved PR on an explicit request in the operator''s language, such as "Start #N", "Merge #N", "#N を取得して", or "#N をマージして". Reads project and administrator-approved machine settings, prepares a git worktree, and launches a worker tab in the current lead workspace.'
-compatibility: 'Designed for Claude Code'
 metadata:
-  agent-tools-agents: 'claude'
+  agent-tools-agents: 'claude opencode'
 ---
 
 # Start an assigned Issue
+
+OpenCode verification covers preparation, worker receipt, and report reading. PR and merge entry remain unverified on OpenCode.
 
 Use the current concern lead's existing workspace. Never create a workspace or use `herdr worktree create` for an Issue. Separate concern leads use separate workspaces. The administrator assigns Issues before work starts; this skill does not claim Issues or coordinate machines.
 
@@ -63,7 +64,7 @@ Confirm the displayed model and reasoning against the approved profile after lau
 - On an unconfirmed launch, say that receipt could not be confirmed and inspect the pane. Do not say that work started successfully.
 - On a later watcher notice, read the current report and screen. `done` means stopped, not completed. Explain changes, verification, and remaining work before announcing completion.
 
-The worker writes its report and ends its turn. Keep background servers owned by one agent and stop them before reporting. Use the project's memory gate before heavy launches. For ordinary assigned work, complete the reviewed PR handoff below. Respect an explicit no-push/no-PR boundary such as an acceptance fixture. This skill does not authorize automatic merging, engine switching, or cross-machine notifications. OpenCode is a manual fallback after fresh approval if needed; it is not part of the Claude Code acceptance run.
+The worker writes its report and ends its turn. Keep background servers owned by one agent and stop them before reporting. Use the project's memory gate before heavy launches. For ordinary assigned work, complete the reviewed PR handoff below. Respect an explicit no-push/no-PR boundary such as an acceptance fixture. This skill does not authorize automatic merging, engine switching, or cross-machine notifications. For an approved OpenCode profile, follow [OpenCode setup](references/setup.md#opencode-leads-and-workers) before preparation and use the report-file wait after receipt. OpenCode watcher notices alone do not establish that work stopped.
 
 ## Hand off a reviewed PR
 

@@ -2,7 +2,7 @@
 
 # agent-tools
 
-Tools for running a **graph of coding agents** on [herdr](https://herdr.dev): one lead agent per workspace that coordinates worker agents in separate tabs. The skills work with **Claude Code, Codex, and Pi**.
+Tools for running a **graph of coding agents** on [herdr](https://herdr.dev): one lead agent per workspace that coordinates worker agents in separate tabs. The skills work with **Claude Code, Codex, Pi, and OpenCode**.
 
 - **agent-graph** — naming, lead promotion and handoff, a watcher that wakes the lead when a worker stops, and small helpers for PRs and Codex reviews
 - **memgate** — keeps many parallel agents from exhausting the machine's memory: gate heavy launches, cap concurrent runs, and alert a coordinator agent
@@ -52,8 +52,8 @@ Each skill records the agents it has been verified with in its `SKILL.md` frontm
 
 | Skill | Verified on | What it does |
 |---|---|---|
-| `agent-graph` | Claude Code, Codex, Pi | Lead and worker naming, lead promotion and handoff, `watch.sh` (wakes the lead when a worker stops or waits for approval), `start.sh` (tab creation through first-brief receipt), `pr.sh`, `review.sh`, launch arguments for claude / codex / agy / Pi |
-| `take-issue` | Claude Code | Start an assigned Issue in the existing workspace; on an explicit merge request, merge only the operator's PR after administrator approval and required CI |
+| `agent-graph` | Claude Code, Codex, Pi, OpenCode | Lead and worker naming, lead promotion and handoff, `watch.sh` (wakes the lead when a worker stops or waits for approval), `start.sh` (tab creation through first-brief receipt), `pr.sh`, `review.sh`, launch arguments for claude / codex / agy / Pi / OpenCode |
+| `take-issue` | Claude Code; OpenCode startup | Start an assigned Issue in the existing workspace; on an explicit merge request, merge only the operator's PR after administrator approval and required CI |
 
 ### memgate plugin
 
@@ -69,7 +69,7 @@ An administrator can approve an exact engine / model / reasoning / permission pr
 
 ## Start an Issue by number
 
-Use `/agent-graph:take-issue` or ask to start Issue #42 after the administrator completes [entry setup](plugins/agent-graph/skills/take-issue/references/setup.md). The skill prepares an assigned Issue and adds a worker tab to the existing workspace. It does not create an Issue workspace. Workers review and simplify before the lead requests the configured administrator reviewer. An explicit merge request can merge only that operator's PR with current-head approval and required CI. Requests and explanations use the operator's language; `Merge #42` and `#42 をマージして` are equivalent examples. Additional harness confirmations remain in force. OpenCode remains a manual fallback.
+Use `/agent-graph:take-issue` or ask to start Issue #42 after the administrator completes [entry setup](plugins/agent-graph/skills/take-issue/references/setup.md). The skill prepares an assigned Issue and adds a worker tab to the existing workspace. It does not create an Issue workspace. Workers review and simplify before the lead requests the configured administrator reviewer. An explicit merge request can merge only that operator's PR with current-head approval and required CI. Requests and explanations use the operator's language; `Merge #42` and `#42 をマージして` are equivalent examples. Additional harness confirmations remain in force. OpenCode supports Issue preparation and worker receipt after [OpenCode setup](plugins/agent-graph/skills/take-issue/references/setup.md#opencode-leads-and-workers). Wait for its report file because herdr can misread its status. OpenCode PR and merge flows have not been verified.
 
 ## Configuration
 
