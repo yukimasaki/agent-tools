@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/yukimasaki/agent-tools/compare/v0.1.6...v0.1.7) (2026-10-26)
+
+
+### Features
+
+* **agent-graph:** [#24](https://github.com/yukimasaki/agent-tools/issues/24) マシンの設定の branch_prefix で、生成するブランチ名の先頭を人ごとに変えられるようにする ([#25](https://github.com/yukimasaki/agent-tools/issues/25)) ([e9b1d87](https://github.com/yukimasaki/agent-tools/commit/e9b1d8734d2a85656bae28ff64c4447767b77a01))
+
 ## [0.1.6](https://github.com/yukimasaki/agent-tools/compare/v0.1.5...v0.1.6) (2026-10-25)
 
 
