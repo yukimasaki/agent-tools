@@ -161,6 +161,7 @@ def prepare(args, info):
         raise Stop(2, "machine profile version or repository does not match")
     account = text(profile, "github_user", r"[A-Za-z0-9][A-Za-z0-9-]*")
     reviewer = text(profile, "reviewer", r"[A-Za-z0-9][A-Za-z0-9-]*") if "reviewer" in profile else None
+    branch_prefix = text(profile, "branch_prefix") if "branch_prefix" in profile else ""
     launch = profile.get("launch")
     approval = profile.get("approval")
     if not isinstance(launch, dict) or not isinstance(approval, dict):
@@ -204,6 +205,7 @@ def prepare(args, info):
             branch = template.format(**fields)
         except ValueError:
             raise Stop(2, "branch_template supports only {type}, {number}, {slug}, and {suffix}")
+        branch = branch_prefix + branch
     checked_branch = git(root, "check-ref-format", "--branch", branch, checked=False)
     if checked_branch.returncode or checked_branch.stdout.strip() != branch:
         raise Stop(2, "branch must be a literal valid Git branch name")
@@ -297,7 +299,7 @@ def main():
     parser.add_argument("--project", default=".")
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--issue", required=True)
-    parser.add_argument("--branch", help="literal Git branch name; overrides project branch_template")
+    parser.add_argument("--branch", help="literal Git branch name; overrides project branch_template and machine branch_prefix")
     parser.add_argument("--run-id")
     parser.add_argument("--prepare-timeout", type=int, default=300, metavar="SECONDS")
     args = parser.parse_args()
