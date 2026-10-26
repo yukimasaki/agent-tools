@@ -2,6 +2,7 @@
   "version": 1,
   "repo": "example/demo",
   "github_user": "example-user",
+  "branch_prefix": "example-user/",
   "launch": {
     "kind": "claude",
     "args": [

@@ -23,6 +23,8 @@ The generic helper does not supply a production preparation script. A project ca
 
 Copy [machine.example.json](machine.example.json) to `~/.config/agent-graph/projects/<project>.json`. `XDG_CONFIG_HOME` changes the config root; `AGENT_GRAPH_CONFIG_ROOT` can explicitly select the agent-graph configuration directory. Authenticate the configured `github_user` before using the entry skill. Set `reviewer` to the administrator's GitHub login. That administrator approves; the operator account creates and requests merging its own PRs.
 
+The optional `branch_prefix` is prepended to generated branch names on this machine only. Use it when a shared repository asks some people to branch under their own name: with `"branch_prefix": "alice/"`, the default template produces `alice/fix/42-search` while the administrator's machine, which omits the field, keeps `fix/42-search`. The prefix applies after `branch_template`; an explicit `--branch` is used as given. The combined name must pass the same Git branch check. Changing the prefix changes the run identity, so an Issue prepared under the old name stops instead of being renamed. The approval hash covers only `launch`, so editing the prefix needs no re-approval.
+
 Choose the engine, model, reasoning, and permission arguments from the installed harness help. Store native arguments as a JSON array, never a shell command. The helper passes no executable name or initial task through this array. Review the exact profile with the administrator. Record the administrator and date, and compute the hash of the approved `launch` object:
 
 ```bash

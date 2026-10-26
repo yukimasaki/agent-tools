@@ -166,6 +166,38 @@ class IssueTests(unittest.TestCase):
                 self.assertEqual(self.run_prepare('--branch='+branch)[0],2)
         self.assertFalse((self.path/'worktrees').exists());self.assertFalse(self.prep_calls.exists())
 
+    def test_machine_branch_prefix_is_prepended_to_the_generated_branch(self):
+        self.profile['branch_prefix']='alice/';self.profile_file.write_text(json.dumps(self.profile))
+        rc,out=self.run_prepare();self.assertEqual(rc,0,out)
+        self.assertEqual(out['branch'],'alice/fix/42-search-page')
+        self.assertEqual(self.git('symbolic-ref','--short','HEAD',root=Path(out['cwd'])),out['branch'])
+        self.assertEqual(self.run_prepare(),(0,out))
+        self.assertEqual(len(json.loads(self.prep_calls.read_text())),1)
+
+    def test_machine_branch_prefix_applies_to_the_project_template(self):
+        self.project['branch_template']='feature/ABC-{number}-{slug}';self.project_file.write_text(json.dumps(self.project))
+        self.profile['branch_prefix']='alice/';self.profile_file.write_text(json.dumps(self.profile))
+        rc,out=self.run_prepare();self.assertEqual(rc,0,out)
+        self.assertEqual(out['branch'],'alice/feature/ABC-42-search-page')
+
+    def test_explicit_branch_is_not_prefixed(self):
+        self.profile['branch_prefix']='alice/';self.profile_file.write_text(json.dumps(self.profile))
+        rc,out=self.run_prepare('--branch','feature/ABC-42-search');self.assertEqual(rc,0,out)
+        self.assertEqual(out['branch'],'feature/ABC-42-search')
+
+    def test_invalid_branch_prefixes_do_not_prepare_worktrees(self):
+        for prefix in ['',42,[],'-alice/','bad..','with space/','alice\n']:
+            with self.subTest(prefix=prefix):
+                self.profile['branch_prefix']=prefix;self.profile_file.write_text(json.dumps(self.profile))
+                self.assertEqual(self.run_prepare()[0],2)
+        self.assertFalse((self.path/'worktrees').exists());self.assertFalse(self.prep_calls.exists())
+
+    def test_changed_branch_prefix_does_not_modify_an_existing_run(self):
+        rc,out=self.run_prepare();self.assertEqual(rc,0,out)
+        self.profile['branch_prefix']='alice/';self.profile_file.write_text(json.dumps(self.profile))
+        self.assertEqual(self.run_prepare()[0],3)
+        self.assertEqual(self.git('symbolic-ref','--short','HEAD',root=Path(out['cwd'])),out['branch'])
+
     def test_changed_branch_template_does_not_modify_an_existing_run(self):
         rc,out=self.run_prepare();self.assertEqual(rc,0,out)
         self.project['branch_template']='topic/{number}';self.project_file.write_text(json.dumps(self.project))
