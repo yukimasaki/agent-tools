@@ -236,10 +236,16 @@ class Launch:
         prompts = {"claude": "❯", "codex": "›"}
         marker = prompts.get(self.args.kind)
         lines = tail.splitlines()[-8:]
-        footer = re.compile(r"\s*(?:[─━-].*[─━-]|⏵⏵.*|(?:personal|team|pro|max|api)\s*\|.*|\? for shortcuts.*"
-                            r"|[◐◑◒◓○●]\s+\S+\s+·\s+/effort\s*|Not logged in · Run /login\s*)", re.I)
+        # Codex 0.167.1 shows a model line ("<model> <reasoning> · Context N% used · ...")
+        # and a hint line that may start with "← for agents · ".
+        footer = re.compile(r"\s*(?:[─━-].*[─━-]|⏵⏵.*|(?:personal|team|pro|max|api)\s*\|.*|(?:← for agents · )?\? for shortcuts.*"
+                            r"|[◐◑◒◓○●]\s+\S+\s+·\s+/effort\s*|Not logged in · Run /login\s*"
+                            r"|[^\s·][^·]* · Context \d+% used(?: · .*)?)", re.I)
+        # Only each harness's own startup placeholder counts as empty input.
+        placeholders = {"claude": r'❯\s+Try "[^"\n]*"', "codex": r"›\s+Ask Codex to do anything"}
+        placeholder = placeholders.get(self.args.kind)
         ready = marker and any((line.strip() == marker or
-                                (self.args.kind == "claude" and re.fullmatch(r'❯\s+Try "[^"\n]*"', line.strip())))
+                                (placeholder and re.fullmatch(placeholder, line.strip())))
                                and all(footer.fullmatch(rest) for rest in lines[i + 1:])
                                for i, line in enumerate(lines))
         if self.args.kind == "opencode":

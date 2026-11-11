@@ -51,6 +51,18 @@ herdr agent prompt <worker> "<reason-and-revision-instructions>"
 - Before answering, always run `herdr agent read <pane> --lines 12` to inspect the requested permission.
 - Merges (`gh pr merge`), force pushes, and `rm -rf` depend on human authorization. The lead inspects the action before answering. Do not build automatic approval for these actions.
 
+### Skip a Codex update screen
+
+Codex 0.167.1 shows `Update available · <current> → <latest>`, the options `1. Update now (runs npm install -g @openai/codex)`, `2. Skip`, and `3. Skip until next version`, and the hint `enter continue · esc skip`. Update now is selected at first. To skip, send Escape only:
+
+```bash
+herdr pane send-keys <pane_id> esc
+```
+
+- Do not use `herdr pane run <pane_id> "2"`. It sends `2` and Enter. In Codex 0.167.1, `2` does not move the selection, so Enter chooses Update now and runs the npm update.
+- Checked on 2026-11-11 with herdr 0.9.5 and codex-cli 0.167.1, using a temporary `CODEX_HOME` whose `version.json` named a newer version: `esc` left the update screen and Codex continued to its next screen without updating, and `2` alone left `1. Update now` selected. Skip until next version and other Codex versions were not checked.
+- Do not update without the user's instruction. `start.sh` stops at this screen with `needs_confirmation`; after skipping, resume the same run with `--pane`.
+
 ## Status semantics
 
 - `agent_status` is `idle` / `working` / `blocked` / `done` / `unknown`.

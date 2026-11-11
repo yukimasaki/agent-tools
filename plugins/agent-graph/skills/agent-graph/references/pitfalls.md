@@ -49,7 +49,7 @@ This is an example value, not a universal limit. Look up the selected model with
 
 ## A Codex update notice prevents agent start
 
-An update prompt can make `agent start` return `agent_not_ready` (`blocked`). Read the options; to skip the update, send `herdr agent send-keys <name> 2`, then `enter` (Skip). Do not update without the user's instruction.
+An update prompt can make `agent start` return `agent_not_ready` (`blocked`). Read the options; to skip the update, send `herdr pane send-keys <pane_id> esc`. Do not send `2` and Enter: in Codex 0.167.1, `2` leaves Update now selected and Enter runs the update. See [herdr.md](herdr.md#skip-a-codex-update-screen). Do not update without the user's instruction.
 
 ## Skill invocation differs by harness
 

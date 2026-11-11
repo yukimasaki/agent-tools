@@ -71,6 +71,17 @@ elif a[:2]==['agent','read']:
  elif mode=='ack_after_idle_render' and d.get('prompted'):print('❯ Submitted brief\nThinking...')
  elif mode=='wrapped_effort':print('❯ Try "edit index.html to..."\n'+'─'*75+'\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n'+' '*55+'◐ medium · /effort')
  elif mode=='not_logged_in':print('❯\n'+'─'*75+'\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n'+' '*41+'Not logged in · Run /login')
+ elif mode.startswith('codex_'):
+  # Observed Codex 0.167.1 startup screen (input field, model line, hints).
+  field='› Ask Codex to do anything'
+  if mode=='codex_typed':field='› Ask Codex to do anything about the brief'
+  if mode=='codex_draft':field='› draft instructions'
+  screen=(field+'\n\n  GPT-6.1-Sol medium · Context 0% used · 872K window · 0199aaaa-bbbb-cccc-dddd-eeeeffff0000 · weekly 99% left\n'
+   '  ← for agents · ? for shortcuts'+' '*54+'⚠ 1 warning · f2 to view')
+  if mode=='codex_update':
+   screen=('  Update available · 0.167.0 → 0.167.1\n  Release notes: https://github.com/openai/codex/releases/latest\n\n'
+    '› 1. Update now (runs `npm install -g @openai/codex`)\n  2. Skip\n  3. Skip until next version\n\n  enter continue · esc skip')
+  print(screen)
  elif mode=='late_ready':d['late_reads']=d.get('late_reads',0)+1;save();print('❯ ' if d['late_reads']>3 else 'An unfamiliar screen')
  elif mode.startswith('opencode_'):
   # Observed OpenCode 2.1.4, 111x69 and 56x69. Initial input is centered.
@@ -277,6 +288,31 @@ class StartupTests(unittest.TestCase):
         rc, out = self.run_start('--ready-grace', '10')
         self.assertEqual((rc, out['result']), (4, 'needs_confirmation'))
         self.assertLess(time.monotonic() - began, 3)
+        self.assertFalse(self.calls('agent prompt'))
+
+    def test_live_codex_startup_placeholder_is_an_empty_input(self):
+        self.set(mode='codex_startup')
+        self.assertEqual(self.run_start('--kind', 'codex')[0], 0)
+        self.assertEqual(len(self.calls('agent prompt')), 1)
+
+    def test_codex_typed_input_is_not_an_empty_input(self):
+        for mode in ('codex_typed', 'codex_draft'):
+            with self.subTest(mode=mode):
+                self.set(mode=mode, calls=[], agent=None)
+                Path(str(self.receipt)+'.start.jsonl').unlink(missing_ok=True)
+                rc, out = self.run_start('--kind', 'codex', '--ready-grace', '0.5')
+                self.assertEqual((rc, out['result']), (5, 'unverified'))
+                self.assertFalse(self.calls('agent prompt'))
+
+    def test_codex_update_screen_needs_confirmation(self):
+        self.set(mode='codex_update')
+        rc, out = self.run_start('--kind', 'codex')
+        self.assertEqual((rc, out['result']), (4, 'needs_confirmation'))
+        self.assertFalse(self.calls('agent prompt'))
+
+    def test_codex_placeholder_does_not_make_claude_ready(self):
+        self.set(mode='codex_startup')
+        self.assertEqual(self.run_start('--ready-grace', '0.5')[0], 5)
         self.assertFalse(self.calls('agent prompt'))
 
     def test_api_hang_respects_overall_deadline(self):
