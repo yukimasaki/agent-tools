@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/yukimasaki/agent-tools/compare/v0.1.7...v0.1.8) (2026-11-11)
+
+
+### Bug Fixes
+
+* **agent-graph:** [#28](https://github.com/yukimasaki/agent-tools/issues/28) Codex 0.167.1 の起動直後の入力欄を見分ける ([#29](https://github.com/yukimasaki/agent-tools/issues/29)) ([6943b9f](https://github.com/yukimasaki/agent-tools/commit/6943b9f4d620197972566e0dfc146f349949b215))
+
 ## [0.1.7](https://github.com/yukimasaki/agent-tools/compare/v0.1.6...v0.1.7) (2026-10-26)
 
 
