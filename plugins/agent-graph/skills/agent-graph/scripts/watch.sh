@@ -40,7 +40,8 @@ TAIL_LINES=8
 FOOTER_LINES=20
 # Match shells only in a footer beginning with ⏵⏵. Historical completion lines
 # can retain "still running" after a shell exits. No matching footer means wake.
-SHELL_RE='· [0-9]+ shells?( ·|[[:space:]]*$)'
+# A shell followed by a comma ("· 1 shell, 1 monitor ·") also counts.
+SHELL_RE='· [0-9]+ shells?( ·|,|[[:space:]]*$)'
 FOOTER_RE='^[[:space:]]*⏵⏵'
 PERMISSION_RE='Do you want to proceed\?|Permission rule'
 # Inspect the last nonblank lines, excluding copied screens higher in the chat.

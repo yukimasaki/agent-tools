@@ -194,6 +194,30 @@ done
 run_watch 7
 expect "Does not wake workers waiting for successive background shells" test "$(prompt_count)" = 0
 
+new_case shellcomma
+printf '  ⏵⏵ bypass permissions on · 1 shell, 1 monitor · ← 5 agents · ↓ to manage\n' >"$STUB/read.w1_p1"
+mklist 1 idle "w1:p1|impl-9|w1:t1|working|5"
+mklist 2 idle "w1:p1|impl-9|w1:t1|done|6"
+mklist 3 idle "w1:p1|impl-9|w1:t1|done|6"
+run_watch 3
+expect "Does not wake while the footer shows a shell followed by a comma" test "$(prompt_count)" = 0
+
+new_case shellcommaend
+printf '  ⏵⏵ bypass permissions on · 1 shell, 1 monitor · ← 5 agents · ↓ to manage\n' >"$STUB/read.w1_p1"
+printf '✻ done · 1 shell, 1 monitor still running\nシェルは終わった\n' >"$STUB/read.w1_p1.4"
+mklist 1 idle "w1:p1|impl-9|w1:t1|working|5"
+mklist 2 idle "w1:p1|impl-9|w1:t1|done|6"
+mklist 3 idle "w1:p1|impl-9|w1:t1|done|6"
+run_watch 3
+expect "Wakes the same seq when the comma-form footer disappears" test "$(prompt_count)" = 1
+
+new_case shellcomma2
+printf '✻ Brewed · done · 1 shell, 1 monitor still running\n  ⏵⏵ bypass permissions on · 1 agent\n' >"$STUB/read.w1_p1"
+mklist 1 idle "w1:p1|impl-9|w1:t1|working|5"
+mklist 2 idle "w1:p1|impl-9|w1:t1|done|6"
+run_watch 2
+expect "Ignores the comma form in a completion line outside the footer" test "$(prompt_count)" = 1
+
 # --- blocked ---
 new_case blocked
 printf '%s\n' "$MARK" >"$STUB/read.w1_p1"
