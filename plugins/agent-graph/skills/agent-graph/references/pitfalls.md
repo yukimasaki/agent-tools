@@ -105,3 +105,13 @@ The generic watcher has no report-path contract and can also misread an OpenCode
 - **Prompts while a human types in the lead's input.** Whether herdr interrupts, overwrites, or appends to the input has not been verified.
 - **done while waiting for background subagents.** Whether a screen with a background agent list such as `← 5 agents` enters `done` has not been verified on a live harness. Do not add subagent markers until verified.
 - **Long-running hooks in blocked.** A hook that stays `blocked` for two observations can cause an awaiting-confirmation notice. No hook-specific handling exists; consider it when a concrete problem occurs.
+
+## Lead context-usage notice limits
+
+`AGENT_GRAPH_LEAD_HANDOFF_PCT` turns on the watcher's check of the lead's context usage. Notes:
+
+- The watcher reads environment variables only at startup. After changing a setting, stop the running watcher (`kill` the PID in `~/.local/state/agent-graph/<workspace_id>/watch.pid`) and start it again with `watch.sh`.
+- The Claude Code session record does not say whether the context window is 200k or 1M tokens. Pass the limit with `AGENT_GRAPH_LEAD_CONTEXT_LIMIT` (default 1000000). Codex records its own window, so that variable does not apply.
+- Only Claude Code and Codex leads are supported. For other harnesses, a lead without a session ID, or a missing record, the watcher logs once per session and sends nothing.
+- The notice is sent once per session ID. If the session ID changes (for example after `/clear`), the count starts over. Whether herdr reports a new ID after such a change has not been verified.
+- A lead that resolves only as `lead-<N>-next` (during a handoff) is not checked.
