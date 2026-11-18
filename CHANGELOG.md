@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/yukimasaki/agent-tools/compare/v0.1.8...v0.1.9) (2026-11-18)
+
+
+### Bug Fixes
+
+* **agent-graph:** [#34](https://github.com/yukimasaki/agent-tools/issues/34) 足元の行が「1 shell, 1 monitor」の作業役を、シェル待ちと判断する ([#35](https://github.com/yukimasaki/agent-tools/issues/35)) ([434aef4](https://github.com/yukimasaki/agent-tools/commit/434aef458d51501a6b8ba262940407d9d49fecf9))
+
 ## [0.1.8](https://github.com/yukimasaki/agent-tools/compare/v0.1.7...v0.1.8) (2026-11-18)
 
 
