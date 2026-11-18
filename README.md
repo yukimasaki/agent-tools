@@ -61,6 +61,10 @@ Each skill records the agents it has been verified with in its `SKILL.md` frontm
 |---|---|---|
 | `memgate` | Claude Code | `gate` before heavy launches, `run` with a concurrency slot, `status`, and a `loop` that alerts a coordinator agent when memory runs low and, when enabled, briefs new workspace leads and reports new workers |
 
+## Remind a lead after compaction
+
+In Claude Code, agent-graph ships a `SessionStart` hook (matcher `compact`). After the conversation is compacted, it tells a lead to check its handoff documents and the session transcript before asking the user to repeat earlier decisions. It prints nothing for workers, outside herdr, or when `herdr` or `jq` is missing. Codex and Pi do not install it.
+
 ## Launch a worker
 
 agent-graph's [`start.sh`](plugins/agent-graph/skills/agent-graph/references/start.md) creates a tab in an existing workspace and confirms receipt of its brief. After a startup timeout, it inspects that same pane and names an unnamed matching agent only when safe. It never automatically answers trust or update confirmations.

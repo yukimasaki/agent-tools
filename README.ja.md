@@ -61,6 +61,10 @@ Pi は `package.json` の `pi.skills` に列挙したスキル（Pi で動作を
 |---|---|---|
 | `memgate` | Claude Code | 重い起動の前の `gate`、同時実行の枠を取る `run`、`status`、メモリが減ったら調整役のエージェントに知らせる `loop`（設定で有効にすると、新しい lead への取り決めの送付と、新しい作業役の報告も行う） |
 
+## コンパクションのあとの知らせ
+
+agent-graph は Claude Code 向けに、`SessionStart`（matcher は `compact`）の hook を同梱しています。会話が要約されたあと、lead に「前に決まったことを聞き直す前に、引き継ぎの文書とセッションの記録を確かめる」と知らせます。作業役、herdr の外、`herdr` や `jq` が無い環境では何も出しません。Codex と Pi には入りません。
+
 ## 作業役の起動
 
 agent-graph の [`start.sh`](plugins/agent-graph/skills/agent-graph/references/start.md) は、既存 workspace にタブを作り、指示書の受付まで確かめます。起動の時間切れでは同じ pane を読み、無名の agent を安全に確認できた場合だけ命名します。信頼や更新の確認には自動で答えません。
