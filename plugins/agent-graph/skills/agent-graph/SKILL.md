@@ -58,6 +58,10 @@ When the user asks to hand off the lead:
 
 Workers continue writing to their assigned report paths after handoff. The watcher resolves the lead by name on each round, so it need not be stopped.
 
+## After compaction
+
+In Claude Code, the plugin's `SessionStart` hook (matcher `compact`, `hooks/after-compact.sh`) runs after every manual or automatic compaction. When your pane is a lead (agent name starts with `lead-`), it adds a notice to your context with the paths of `~/.local/state/agent-graph/<workspace_id>/handoff-g*.md` that exist and the session transcript path. When you receive that notice, read the handoff documents and search the transcript before asking the user to repeat anything that may already have been decided; ask only about what neither settles. The hook prints nothing for workers, outside herdr, or when `herdr` or `jq` is missing, so sessions that are not leads do nothing. Codex and Pi do not install it.
+
 ## Tools
 
 | Tool | Usage | Behavior |
