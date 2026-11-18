@@ -20,6 +20,8 @@ not_ok() { FAIL=$((FAIL+1)); printf 'not ok %s\n' "$1" >&2; }
 expect() { local name="$1"; shift; if "$@"; then ok "$name"; else not_ok "$name"; fi; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
+# Settings from the caller environment must not leak into the cases.
+unset AGENT_GRAPH_LEAD_HANDOFF_PCT AGENT_GRAPH_LEAD_CONTEXT_LIMIT
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat >"$BIN/herdr" <<'STUB'
@@ -193,6 +195,30 @@ for n in 2 3 4 5 6 7; do
 done
 run_watch 7
 expect "Does not wake workers waiting for successive background shells" test "$(prompt_count)" = 0
+
+new_case shellcomma
+printf '  ⏵⏵ bypass permissions on · 1 shell, 1 monitor · ← 5 agents · ↓ to manage\n' >"$STUB/read.w1_p1"
+mklist 1 idle "w1:p1|impl-9|w1:t1|working|5"
+mklist 2 idle "w1:p1|impl-9|w1:t1|done|6"
+mklist 3 idle "w1:p1|impl-9|w1:t1|done|6"
+run_watch 3
+expect "Does not wake while the footer shows a shell followed by a comma" test "$(prompt_count)" = 0
+
+new_case shellcommaend
+printf '  ⏵⏵ bypass permissions on · 1 shell, 1 monitor · ← 5 agents · ↓ to manage\n' >"$STUB/read.w1_p1"
+printf '✻ done · 1 shell, 1 monitor still running\nシェルは終わった\n' >"$STUB/read.w1_p1.4"
+mklist 1 idle "w1:p1|impl-9|w1:t1|working|5"
+mklist 2 idle "w1:p1|impl-9|w1:t1|done|6"
+mklist 3 idle "w1:p1|impl-9|w1:t1|done|6"
+run_watch 3
+expect "Wakes the same seq when the comma-form footer disappears" test "$(prompt_count)" = 1
+
+new_case shellcomma2
+printf '✻ Brewed · done · 1 shell, 1 monitor still running\n  ⏵⏵ bypass permissions on · 1 agent\n' >"$STUB/read.w1_p1"
+mklist 1 idle "w1:p1|impl-9|w1:t1|working|5"
+mklist 2 idle "w1:p1|impl-9|w1:t1|done|6"
+run_watch 2
+expect "Ignores the comma form in a completion line outside the footer" test "$(prompt_count)" = 1
 
 # --- blocked ---
 new_case blocked

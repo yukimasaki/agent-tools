@@ -2,7 +2,7 @@
 
 ## A worker enters done with a background shell still running
 
-Claude Code can end its response in `done` while background work continues. The screen may show `· done <time> · 1 shell still running` and a footer containing `· 1 shell`. The watcher treats the footer's `· N shell` as waiting rather than a stop requiring attention. It uses the current screen each round, so removing the footer triggers a notice for the same stop. It ignores `still running` in a completion line because that historical line can remain after the shell exits.
+Claude Code can end its response in `done` while background work continues. The screen may show `· done <time> · 1 shell still running` and a footer containing `· 1 shell`. The watcher treats the footer's `· N shell` as waiting, including when a comma follows it (`· 1 shell, 1 monitor ·`), rather than a stop requiring attention. It uses the current screen each round, so removing the footer triggers a notice for the same stop. It ignores `still running` in a completion line because that historical line can remain after the shell exits.
 
 **Workers must stop background servers and shells before ending their turn**, or the watcher may continue treating them as waiting. See [messaging.md](messaging.md).
 
