@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.8](https://github.com/yukimasaki/agent-tools/compare/v0.1.7...v0.1.8) (2026-11-18)
+
+
+### Features
+
+* **agent-graph:** [#31](https://github.com/yukimasaki/agent-tools/issues/31) watch.sh が lead のコンテキストの使用率を見張り、閾値を超えたら引き継ぎを促す ([#33](https://github.com/yukimasaki/agent-tools/issues/33)) ([73d661e](https://github.com/yukimasaki/agent-tools/commit/73d661e24a53e813ece7dc6782a58e952c26c41d))
+* **agent-graph:** [#31](https://github.com/yukimasaki/agent-tools/issues/31) コンパクションのあと、lead に聞き直す前の記録の確認を知らせる hook を足す ([#32](https://github.com/yukimasaki/agent-tools/issues/32)) ([79fe90d](https://github.com/yukimasaki/agent-tools/commit/79fe90d902994bcc669148e263cc5e7d5be9ab93))
+
+
+### Bug Fixes
+
+* **agent-graph:** [#28](https://github.com/yukimasaki/agent-tools/issues/28) Codex 0.167.1 の起動直後の入力欄を見分ける ([#29](https://github.com/yukimasaki/agent-tools/issues/29)) ([6943b9f](https://github.com/yukimasaki/agent-tools/commit/6943b9f4d620197972566e0dfc146f349949b215))
+
 ## [0.1.7](https://github.com/yukimasaki/agent-tools/compare/v0.1.6...v0.1.7) (2026-10-26)
 
 
