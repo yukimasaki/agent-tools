@@ -52,7 +52,7 @@ Each skill records the agents it has been verified with in its `SKILL.md` frontm
 
 | Skill | Verified on | What it does |
 |---|---|---|
-| `agent-graph` | Claude Code, Codex, Pi, OpenCode | Lead and worker naming, lead promotion and handoff, `watch.sh` (wakes the lead when a worker stops or waits for approval), `start.sh` (tab creation through first-brief receipt), `pr.sh`, `review.sh`, launch arguments for claude / codex / agy / Pi / OpenCode |
+| `agent-graph` | Claude Code, Codex, Pi, OpenCode | Lead and worker naming, lead promotion and handoff, `watch.sh` (wakes the lead when a worker stops or waits for approval, and optionally asks it to hand off when its context usage passes a threshold), `start.sh` (tab creation through first-brief receipt), `pr.sh`, `review.sh`, launch arguments for claude / codex / agy / Pi / OpenCode |
 | `take-issue` | Claude Code; OpenCode startup | Start an assigned Issue in the existing workspace; on an explicit merge request, merge only the operator's PR after administrator approval and required CI |
 
 ### memgate plugin

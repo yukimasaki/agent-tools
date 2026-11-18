@@ -72,12 +72,17 @@ new_case() {
   STUB="$TMP/$1.stub"; STATE="$TMP/$1.state"; mkdir -p "$STUB" "$STATE"
 }
 
+# Optional lead fields for mklist: LEAD_SESS (agent_session value), LEAD_CWD,
+# LEAD_AGENT (default claude), LEAD_NAME (default lead-9).
 # mklist <N|last> <lead-status> [pane|name|tab|status|seq[|completion_seq] ...]
 # A - name is unnamed; default workspace is w1; prefix w2: selects workspace w2.
 mklist() {
   local n="$1" lead="$2"; shift 2
   local items=() row ws pane name tab st seq
-  items+=("$(jq -nc --arg s "$lead" '{agent:"claude",agent_status:$s,name:"lead-9",pane_id:"w1:p0",tab_id:"w1:t0",workspace_id:"w1",state_change_seq:1}')")
+  items+=("$(jq -nc --arg s "$lead" --arg sess "${LEAD_SESS:-}" --arg cwd "${LEAD_CWD:-}" --arg ag "${LEAD_AGENT:-claude}" --arg nm "${LEAD_NAME:-lead-9}" \
+    '{agent:$ag,agent_status:$s,name:$nm,pane_id:"w1:p0",tab_id:"w1:t0",workspace_id:"w1",state_change_seq:1}
+     + (if $sess == "" then {} else {agent_session:{agent:$ag,kind:"id",source:"herdr:test",value:$sess}} end)
+     + (if $cwd == "" then {} else {cwd:$cwd} end)')")
   for row in "$@"; do
     ws=w1; [[ "$row" == w2:* ]] && { ws=w2; row="${row#w2:}"; }
     IFS='|' read -r pane name tab st seq comp <<<"$row"
@@ -92,7 +97,7 @@ mklist() {
 
 # $1=number of polling rounds.
 run_watch() {
-  STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" AGENT_GRAPH_WATCH_FOREGROUND=1 \
+  STUB_DIR="$STUB" PATH="$BIN:$PATH" CLAUDE_CONFIG_DIR="$TMP/claude-home" CODEX_HOME="$TMP/codex-home" AGENT_GRAPH_STATE_ROOT="$STATE" AGENT_GRAPH_WATCH_FOREGROUND=1 \
     AGENT_GRAPH_WATCH_INTERVAL=0 AGENT_GRAPH_WATCH_MAX_ROUNDS="$1" bash "$WATCH" lead-9 >"$STATE/out.txt" 2>&1
 }
 prompts() { cat "$STUB/prompts.log" 2>/dev/null || true; }
@@ -822,6 +827,107 @@ if [[ -r /proc/self/stat ]]; then
 else
   printf 'ok launch exclusion # SKIP /proc unavailable\n'
 fi
+
+# --- Lead context usage ---
+# Records are minimal synthetic session files under test-owned config directories.
+# mkclaude <id> <input> <cache_creation> <cache_read> [sidechain]; mkcodex <id> <input> <window>
+mkclaude() {
+  mkdir -p "$TMP/claude-home/projects/p1"
+  jq -nc --argjson i "$2" --argjson c "$3" --argjson r "$4" --argjson sc "${5:-false}" \
+    '{type:"assistant",isSidechain:$sc,message:{usage:{input_tokens:$i,cache_creation_input_tokens:$c,cache_read_input_tokens:$r,output_tokens:5}}}' >>"$TMP/claude-home/projects/p1/$1.jsonl"
+}
+mkcodex() {
+  mkdir -p "$TMP/codex-home/sessions/2026/01/01"
+  { jq -nc '{type:"event_msg",payload:{type:"task_started"}}'
+    jq -nc --argjson i "$2" --argjson w "$3" '{type:"event_msg",payload:{type:"token_count",info:{last_token_usage:{input_tokens:$i},model_context_window:$w}}}'
+  } >>"$TMP/codex-home/sessions/2026/01/01/rollout-2026-01-01T00-00-00-$1.jsonl"
+}
+ctx_on() { export AGENT_GRAPH_LEAD_HANDOFF_PCT="${1:-70}"; }
+ctx_off() { unset AGENT_GRAPH_LEAD_HANDOFF_PCT AGENT_GRAPH_LEAD_CONTEXT_LIMIT; unset LEAD_SESS LEAD_AGENT LEAD_NAME; }
+rm -rf "$TMP/claude-home" "$TMP/codex-home"
+
+new_case ctxoff
+LEAD_SESS=sess-off; mkclaude sess-off 1 1 999000
+mklist 1 idle; run_watch 2
+expect "Does not notify about context when the threshold is unset" test "$(prompt_count)" = 0
+expect "Does not read the record when the threshold is unset" bash -c '! grep -q "lead context" "$1"' _ "$STATE/w1/watch.log"
+out="$(AGENT_GRAPH_LEAD_HANDOFF_PCT=abc STUB_DIR="$STUB" PATH="$BIN:$PATH" AGENT_GRAPH_STATE_ROOT="$STATE" AGENT_GRAPH_WATCH_FOREGROUND=1 AGENT_GRAPH_WATCH_MAX_ROUNDS=1 bash "$WATCH" lead-9 2>&1)"; rc=$?
+expect "Rejects a non-numeric threshold at startup" bash -c '[[ "$1" -ne 0 && "$2" == *AGENT_GRAPH_LEAD_HANDOFF_PCT* ]]' _ "$rc" "$out"
+
+ctx_on 70
+new_case ctxlow
+LEAD_SESS=sess-low; mkclaude sess-low 2 1000 600000
+mklist 1 idle; run_watch 2
+expect "Does not notify below the threshold" test "$(prompt_count)" = 0
+
+new_case ctxhigh
+LEAD_SESS=sess-high; mkclaude sess-high 2 1000 719000
+mklist 1 idle; run_watch 3
+body="$(prompts)"
+expect "Notifies once when usage reaches the threshold, not again while it stays above" test "$(prompt_count)" = 1
+expect "Notice states percent, tokens with the default 1M limit, and threshold" bash -c '[[ "$1" == *"lead context usage reached 72% (720,002 / 1,000,000 tokens; threshold 70%)."* && "$1" == *"Hand off to a new lead"* ]]' _ "$body"
+expect "Sends one human notice after delivery" bash -c '[[ "$(grep -c "context 72%, handoff requested --sound request" "$1")" = 1 ]]' _ "$STUB/notify.log"
+
+new_case ctxdefer
+LEAD_SESS=sess-defer; mkclaude sess-defer 2 1000 800000
+mklist 1 working; mklist 2 working; mklist 3 idle
+run_watch 3
+expect "Defers while the lead is working and delivers once it is idle" test "$(prompt_count)" = 1
+expect "Defers the notice to a round when the lead is idle" test "$(head -1 "$STUB/prompt.rounds")" = 4
+expect "Sends no human notice while deferred" bash -c '[[ ! -s "$1" || "$(grep -c "context" "$1")" = 1 ]]' _ "$STUB/notify.log"
+
+new_case ctxcodex
+LEAD_SESS=sess-cx; LEAD_AGENT=codex; mkcodex sess-cx 600000 800000
+mklist 1 idle; AGENT_GRAPH_LEAD_CONTEXT_LIMIT=2000000 run_watch 1
+expect "Codex uses the model_context_window in the record (75% of 800,000)" bash -c '[[ "$1" == *"reached 75% (600,000 / 800,000 tokens"* ]]' _ "$(prompts)"
+LEAD_AGENT=claude
+
+new_case ctxlimit
+LEAD_SESS=sess-lim; mkclaude sess-lim 1 0 150000
+mklist 1 idle; AGENT_GRAPH_LEAD_CONTEXT_LIMIT=200000 run_watch 1
+expect "Claude Code uses AGENT_GRAPH_LEAD_CONTEXT_LIMIT" bash -c '[[ "$1" == *"reached 75% (150,001 / 200,000 tokens"* ]]' _ "$(prompts)"
+
+new_case ctxmissing
+LEAD_SESS=sess-none
+mklist 1 idle; run_watch 3
+expect "Does not notify when the record is missing" test "$(prompt_count)" = 0
+expect "Logs a missing record once" bash -c '[[ "$(grep -c "session record not found" "$1")" = 1 ]]' _ "$STATE/w1/watch.log"
+
+new_case ctxbatch
+LEAD_SESS=sess-batch; mkclaude sess-batch 2 1000 800000
+mklist 1 working "w1:p1|impl-9|w1:t1|working|5"
+mklist 2 idle "w1:p1|impl-9|w1:t1|done|6"
+run_watch 2
+body="$(prompts)"
+expect "Combines a worker stop and the context notice in one message" bash -c '[[ "$1" == *"impl-9 entered done"*"━━━━━━━━"*"lead context usage reached"* ]]' _ "$body"
+expect "Sends the combined notice once" test "$(prompt_count)" = 1
+
+new_case ctxnext
+mkclaude sess-next 2 1000 800000
+LEAD_SESS= mklist 1 idle
+LEAD_SESS=sess-next LEAD_NAME=lead-9-next mklist 2 idle
+LEAD_SESS=sess-next LEAD_NAME=lead-9-next mklist last idle
+run_watch 3
+expect "Does not read the record when the lead resolves as -next" bash -c '[[ "$1" == 0 ]] && ! grep -q "context usage" "$2"' _ "$(prompt_count)" "$STATE/w1/watch.log"
+
+new_case ctxid
+LEAD_SESS=sess-old; mkclaude sess-old 2 1000 800000; mkclaude sess-new 2 1000 100000
+mklist 1 idle; mklist 2 idle
+LEAD_SESS=sess-new mklist 3 idle
+run_watch 3
+expect "Does not notify a new session ID below the threshold" test "$(prompt_count)" = 1
+mkclaude sess-new 2 1000 900000
+rm -f "$STUB/calls"
+LEAD_SESS=sess-new mklist 1 idle; LEAD_SESS=sess-new mklist last idle; rm -f "$STUB/list.2.json" "$STUB/list.3.json"
+run_watch 2
+expect "Counts again for a new session ID and notifies once more" test "$(prompt_count)" = 2
+expect "Names the new usage in the second notice" bash -c '[[ "$1" == *"reached 90%"* ]]' _ "$(prompts)"
+
+new_case ctxsidechain
+LEAD_SESS=sess-sc; mkclaude sess-sc 2 1000 100000; mkclaude sess-sc 2 1000 900000 true
+mklist 1 idle; run_watch 2
+expect "Ignores sidechain assistant lines" test "$(prompt_count)" = 0
+ctx_off
 
 # --- Detached startup and automatic exit ---
 new_case bg

@@ -16,6 +16,11 @@
 #   AGENT_GRAPH_WATCH_MAX_ROUNDS  Stop after this many rounds; 0 is unlimited
 #   AGENT_GRAPH_NO_SETSID         1 uses nohup alone (tests)
 #   AGENT_GRAPH_NO_FLOCK          1 uses mkdir locks instead of flock (tests)
+#   AGENT_GRAPH_LEAD_HANDOFF_PCT  Lead context usage threshold in percent (integer).
+#                                 Unset or empty disables the check and reads no
+#                                 session record. Read at startup; restart to change.
+#   AGENT_GRAPH_LEAD_CONTEXT_LIMIT  Claude Code context limit in tokens (default
+#                                 1000000). Codex records its own window.
 
 if (( BASH_VERSINFO[0] < 4 )); then
   echo "agent-graph requires Bash 4 or newer (current: $BASH_VERSION)" >&2
@@ -26,6 +31,9 @@ set -uo pipefail
 STATE_ROOT="${AGENT_GRAPH_STATE_ROOT:-$HOME/.local/state/agent-graph}"
 INTERVAL="${AGENT_GRAPH_WATCH_INTERVAL:-30}"
 MAX_ROUNDS="${AGENT_GRAPH_WATCH_MAX_ROUNDS:-0}"
+# Lead context usage: Claude Code and Codex only, read from the session record.
+HANDOFF_PCT="${AGENT_GRAPH_LEAD_HANDOFF_PCT:-}"
+CTX_LIMIT="${AGENT_GRAPH_LEAD_CONTEXT_LIMIT:-1000000}"
 # Last pane lines included in the notice.
 TAIL_LINES=8
 # Search beyond the notice tail: background agent lists can follow the footer.
@@ -59,6 +67,8 @@ esac
 # Normalize the temporary handoff name to the active lead name.
 LEAD="${1%-next}"
 [[ "$LEAD" =~ ^lead-[a-z0-9_-]+$ ]] || die "lead name must use lead-<number-or-name>: $LEAD"
+[[ -z "$HANDOFF_PCT" || "$HANDOFF_PCT" =~ ^[0-9]+$ ]] || die "AGENT_GRAPH_LEAD_HANDOFF_PCT must be an integer percentage: $HANDOFF_PCT"
+[[ "$CTX_LIMIT" =~ ^[1-9][0-9]*$ ]] || die "AGENT_GRAPH_LEAD_CONTEXT_LIMIT must be a positive integer: $CTX_LIMIT"
 command -v herdr >/dev/null 2>&1 || die "herdr not found"
 command -v jq >/dev/null 2>&1 || die "jq not found"
 
@@ -211,7 +221,13 @@ trap '[[ "$(cut -d" " -f1 "$PID_FILE" 2>/dev/null)" == "$$" ]] && rm -f "$PID_FI
 # Per-pane records: lead/human notified seq, previous blocked seq, exited
 # delivery, previous wake seq, human failure key/count, tail cache, name/tab.
 declare -A NOTIFIED=() HUMAN=() BLOCKED_SEEN=() EXITED=() EXITED_HUMAN=() WAKE_SEEN=() HUMAN_FAIL=() TAIL_CACHE=() LAST_NAME=() LAST_TAB=()
-LEAD_TARGET=""; LEAD_STATUS=""; LEAD_KIND=""
+LEAD_TARGET=""; LEAD_STATUS=""; LEAD_KIND=""; LEAD_SESSION=""; LEAD_PANE=""
+# Lead context records, keyed by session ID (or pane when there is no ID):
+# CTX_DONE delivered to the lead, CTX_WARNED logged once, CTX_MTIME/CTX_RES the
+# record mtime and "used limit" read last, CTX_HUMAN/CTX_HUMAN_FAIL human notice.
+declare -A CTX_DONE=() CTX_WARNED=() CTX_MTIME=() CTX_RES=() CTX_HUMAN=() CTX_HUMAN_FAIL=()
+# Pending lead notice this round: key, percent, used, limit.
+CTX_KEY=""; CTX_PCT=""; CTX_USED=""; CTX_LIM=""
 # Current-round stops. URGENT: confirmation markers; TOLD: lead already told;
 # SENT: delivered this round. OBSERVED means observe has run at least once.
 W_PANE=(); W_NAME=(); W_TAB=(); W_STATUS=(); W_SEQ=(); W_TOLD=(); W_SENT=(); W_URGENT=()
@@ -383,29 +399,134 @@ compose() {
   printf -- '--- last %s pane lines ---\n%s\n' "$TAIL_LINES" "$(tail_of "$pane")"
 }
 
+fmt_num() {
+  local n="$1" out=""
+  while (( ${#n} > 3 )); do out=",${n: -3}$out"; n="${n:0:${#n}-3}"; done
+  printf '%s%s' "$n" "$out"
+}
+
+# Print the file's lines from the end.
+rev_lines() { if command -v tac >/dev/null 2>&1; then tac "$1"; else tail -r "$1"; fi; }
+
+ctx_warn() {
+  [[ -z "${CTX_WARNED[$1]+x}" ]] || return 0
+  CTX_WARNED[$1]=1
+  log "lead context: $2 (${1}); usage check skipped"
+}
+
+# Print "<used> <limit>" from the last usage entry of a session record.
+# Search from the end of the file instead of passing the whole file to jq.
+read_usage() {
+  local kind="$1" file="$2" out
+  case "$kind" in
+    claude)
+      out="$(rev_lines "$file" 2>/dev/null | grep -E '"type":"assistant"' | head -n 200 | jq -r '
+        select(.type == "assistant" and (.isSidechain != true) and (.message.usage | type) == "object")
+        | .message.usage
+        | ((.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0)) as $u
+        | select($u > 0) | "\($u) '"$CTX_LIMIT"'"' 2>/dev/null | head -n 1)" ;;
+    codex)
+      out="$(rev_lines "$file" 2>/dev/null | grep -E '"token_count"' | head -n 50 | jq -r '
+        select(.type == "event_msg" and .payload.type == "token_count"
+               and (.payload.info.last_token_usage.input_tokens | type) == "number"
+               and (.payload.info.model_context_window | type) == "number"
+               and .payload.info.model_context_window > 0)
+        | "\(.payload.info.last_token_usage.input_tokens) \(.payload.info.model_context_window)"' 2>/dev/null | head -n 1)" ;;
+  esac
+  [[ "$out" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
+  printf '%s' "$out"
+}
+
+# Set CTX_* when the lead's usage reached the threshold and was not yet delivered.
+# Read only for the active lead name (not -next), and only when the record's
+# mtime changed since the last read.
+check_lead_context() {
+  CTX_KEY=""; CTX_PCT=""; CTX_USED=""; CTX_LIM=""
+  [[ -n "$HANDOFF_PCT" && "$LEAD_TARGET" == "$LEAD" ]] || return 0
+  local id="$LEAD_SESSION" key base file="" f mt res used lim pct
+  key="${id:-pane:$LEAD_PANE}"
+  [[ "${CTX_DONE[$key]-}" != 1 ]] || return 0
+  case "$LEAD_KIND" in
+    claude|codex) ;;
+    *) ctx_warn "$key" "unsupported harness '$LEAD_KIND'"; return 0 ;;
+  esac
+  if [[ ! "$id" =~ ^[A-Za-z0-9._-]+$ ]]; then ctx_warn "$key" "no session ID"; return 0; fi
+  if [[ "$LEAD_KIND" == claude ]]; then
+    base="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    for f in "$base"/projects/*/"$id".jsonl; do [[ -f "$f" ]] && { file="$f"; break; }; done
+  else
+    base="${CODEX_HOME:-$HOME/.codex}"
+    for f in "$base"/sessions/*/*/*/rollout-*-"$id".jsonl; do [[ -f "$f" ]] && { file="$f"; break; }; done
+  fi
+  if [[ -z "$file" || ! -r "$file" ]]; then ctx_warn "$key" "session record not found"; return 0; fi
+  mt="$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || true)"
+  if [[ -n "$mt" && "${CTX_MTIME[$key]-}" == "$mt" ]]; then
+    res="${CTX_RES[$key]-}"
+  else
+    res="$(read_usage "$LEAD_KIND" "$file")" || res=""
+    CTX_MTIME[$key]="$mt"; CTX_RES[$key]="$res"
+  fi
+  if [[ -z "$res" ]]; then ctx_warn "$key" "no usage entry in the session record"; return 0; fi
+  read -r used lim <<<"$res"
+  pct=$(( used * 100 / lim ))
+  if (( pct >= 10#$HANDOFF_PCT )); then
+    CTX_KEY="$key"; CTX_PCT="$pct"; CTX_USED="$used"; CTX_LIM="$lim"
+  fi
+}
+
+ctx_notice() {
+  printf '[watch] lead context usage reached %s%% (%s / %s tokens; threshold %s%%).\n' "$CTX_PCT" "$(fmt_num "$CTX_USED")" "$(fmt_num "$CTX_LIM")" "$((10#$HANDOFF_PCT))"
+  printf 'Finish the current step, then hand off to a new lead following "Hand off to a new lead" in the agent-graph skill. Do not start new work before the handoff.\n'
+}
+
+# After delivery, tell the human once. Try up to three times across rounds.
+notify_ctx_human() {
+  local key fails
+  for key in "${!CTX_HUMAN[@]}"; do
+    [[ "${CTX_HUMAN[$key]}" != done ]] || continue
+    if herdr notification show "$LEAD: context ${CTX_HUMAN[$key]}%, handoff requested" --sound request >/dev/null 2>&1; then
+      CTX_HUMAN[$key]=done
+      log "notified human of lead context usage"
+    else
+      fails=$(( ${CTX_HUMAN_FAIL[$key]:-0} + 1 )); CTX_HUMAN_FAIL[$key]=$fails
+      if (( fails >= 3 )); then
+        CTX_HUMAN[$key]=done
+        log "lead context human notification failed 3 times; giving up"
+      else
+        log "lead context human notification failed (attempt $fails); retry next round"
+      fi
+    fi
+  done
+}
+
 # Batch undelivered stops. Busy/question/read-failure deferrals do not modify
 # delivery records. Re-read the lead by name after composing the batch.
 flush() {
-  local i body="" lead_tail
+  local i body="" lead_tail n
   local -a idx=()
   for i in "${!W_PANE[@]}"; do [[ "${W_TOLD[$i]}" == 1 ]] || idx+=("$i"); done
-  ((${#idx[@]} > 0)) || return 0
+  n=${#idx[@]}; [[ -z "$CTX_KEY" ]] || n=$((n + 1))
+  (( n > 0 )) || return 0
   if [[ "$LEAD_STATUS" == working || "$LEAD_STATUS" == blocked ]]; then
-    log "lead is $LEAD_STATUS; defer ${#idx[@]} notices (reevaluate next round)"
+    log "lead is $LEAD_STATUS; defer $n notices (reevaluate next round)"
     return 0
   fi
   for i in "${idx[@]}"; do
     [[ -z "$body" ]] || body+=$'\n\n━━━━━━━━\n\n'
     body+="$(compose "$i")"
   done
+  if [[ -n "$CTX_KEY" ]]; then
+    [[ -z "$body" ]] || body+=$'\n\n━━━━━━━━\n\n'
+    body+="$(ctx_notice)"
+  fi
   if [[ "$LEAD_KIND" == claude ]]; then
     if ! load_tail "$LEAD_TARGET" fresh; then
-      log "cannot read lead screen; defer ${#idx[@]} notices (reevaluate next round)"
+      log "cannot read lead screen; defer $n notices (reevaluate next round)"
       return 0
     fi
     lead_tail="$(tail_of "$LEAD_TARGET" "$FOOTER_LINES" | sed '/^[[:space:]]*$/d' | tail -n "$LEAD_PROMPT_FOOTER_LINES")"
     if grep -Eq "$LEAD_PROMPT_RE" <<<"$lead_tail"; then
-      log "lead displays a question screen; defer ${#idx[@]} notices (reevaluate next round)"
+      log "lead displays a question screen; defer $n notices (reevaluate next round)"
       return 0
     fi
   fi
@@ -416,6 +537,10 @@ flush() {
       unset "BLOCKED_SEEN[${W_PANE[$i]}]"
       log "woke lead ($LEAD_TARGET): $(agent_name_of "${W_NAME[$i]}") (${W_PANE[$i]}) ${W_STATUS[$i]}"
     done
+    if [[ -n "$CTX_KEY" ]]; then
+      CTX_DONE[$CTX_KEY]=1; CTX_HUMAN[$CTX_KEY]="$CTX_PCT"
+      log "woke lead ($LEAD_TARGET): context usage ${CTX_PCT}%"
+    fi
   else
     log "cannot deliver to lead; reevaluate next round"
   fi
@@ -425,15 +550,17 @@ while true; do
   round=$((round + 1))
   TAIL_CACHE=()
   if list_json="$(herdr agent list 2>/dev/null)" && jq -e '.result.agents' >/dev/null 2>&1 <<<"$list_json"; then
-    LEAD_TARGET=""; LEAD_STATUS=""; LEAD_KIND=""
+    LEAD_TARGET=""; LEAD_STATUS=""; LEAD_KIND=""; LEAD_SESSION=""; LEAD_PANE=""
     # Resolve within this workspace; prefer active lead over temporary -next.
     # jq replaces empty fields because shell IFS collapses adjacent tabs.
-    IFS=$'\t' read -r LEAD_TARGET LEAD_STATUS LEAD_KIND < <(jq -r --arg ws "$WS" --arg n "$LEAD" '
+    IFS=$'\t' read -r LEAD_TARGET LEAD_STATUS LEAD_KIND LEAD_SESSION LEAD_PANE < <(jq -r --arg ws "$WS" --arg n "$LEAD" '
       [.result.agents[]? | select(.workspace_id == $ws)] as $a
       | ([$a[] | select(.name == $n)][0] // [$a[] | select(.name == ($n + "-next"))][0] // empty)
-      | [.name, .agent_status, .agent]
+      | [.name, .agent_status, .agent, .agent_session.value, .pane_id]
       | map(if . == null or . == "" then "-" else . end) | @tsv' <<<"$list_json")
     [[ "$LEAD_STATUS" != "-" ]] || LEAD_STATUS=""
+    [[ "$LEAD_SESSION" != "-" ]] || LEAD_SESSION=""
+    [[ "$LEAD_PANE" != "-" ]] || LEAD_PANE=""
     if [[ -z "$LEAD_TARGET" ]]; then
       ws_out="$(herdr workspace get "$WS" 2>&1 || true)"
       lead_missing=$((lead_missing + 1))
@@ -457,8 +584,10 @@ while true; do
           log "cannot record first observation readiness"
         fi
       fi
+      check_lead_context
       flush
       notify_human
+      notify_ctx_human
     fi
   else
     log "cannot connect to herdr; retry next round"

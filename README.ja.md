@@ -52,7 +52,7 @@ Pi は `package.json` の `pi.skills` に列挙したスキル（Pi で動作を
 
 | スキル | 確認済み | 内容 |
 |---|---|---|
-| `agent-graph` | Claude Code、Codex、Pi、OpenCode | lead と作業役の命名、lead の昇格と引き継ぎ、`watch.sh`（作業役が止まったり承認待ちになったりしたら lead を起こす）、`start.sh`（タブの作成から最初の指示の受付確認まで）、`pr.sh`、`review.sh`、claude・codex・agy・Pi・OpenCode の起動引数 |
+| `agent-graph` | Claude Code、Codex、Pi、OpenCode | lead と作業役の命名、lead の昇格と引き継ぎ、`watch.sh`（作業役が止まったり承認待ちになったりしたら lead を起こす。設定すれば、lead のコンテキストの使用率が閾値を超えたときに引き継ぎも促す）、`start.sh`（タブの作成から最初の指示の受付確認まで）、`pr.sh`、`review.sh`、claude・codex・agy・Pi・OpenCode の起動引数 |
 | `take-issue` | Claude Code、OpenCode の起動 | 「#N を取得して」から既存 workspace の作業タブを起動し、「#N をマージして」で本人の PR の管理者 Approve と必須 CI を確認して取り込む |
 
 ### memgate プラグイン
