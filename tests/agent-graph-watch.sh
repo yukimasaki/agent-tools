@@ -20,6 +20,8 @@ not_ok() { FAIL=$((FAIL+1)); printf 'not ok %s\n' "$1" >&2; }
 expect() { local name="$1"; shift; if "$@"; then ok "$name"; else not_ok "$name"; fi; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
+# Settings from the caller environment must not leak into the cases.
+unset AGENT_GRAPH_LEAD_HANDOFF_PCT AGENT_GRAPH_LEAD_CONTEXT_LIMIT
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat >"$BIN/herdr" <<'STUB'
