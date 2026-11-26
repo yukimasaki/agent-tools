@@ -173,6 +173,25 @@ class MemgateTests(unittest.TestCase):
         self.assertIn("A [a] lead=lead-a,lead-b", memgate.report(result, self.cfg))
         self.assertIn("lead-a,lead-b", result["suspects"][0][3])
 
+    def test_graph_shows_floors_psi_and_aligns_wide_names(self):
+        result = dict(snapshot("OK"), avail=20000, total=40000, swap=10000, swap_total=10000, psi=(5.0, 0.0),
+                      usage={"a": 4000, "b": 2000, "c": 10}, wss={"a": "西予", "b": "raven"})
+        graph = memgate.render_graph(result, dataclasses.replace(self.cfg, psi_threshold=10.0), width=40, top=2)
+        lines = graph.splitlines()
+        free = next(line for line in lines if line.startswith("空き"))
+        self.assertEqual(free.count("█"), 20)
+        self.assertEqual(next(line for line in lines if line.startswith("swap")).count("█"), 40)
+        self.assertEqual(next(line for line in lines if "some10" in line).count("█"), 10)
+        self.assertEqual(next(line for line in lines if "some60" in line).count("█"), 0)
+        self.assertTrue(any("W=WARN" in line for line in lines))
+        rows = lines[lines.index("workspace 別の使用量") + 1:]
+        starts = {memgate.cell_width(line[:line.index("█")]) for line in rows if "█" in line}
+        self.assertEqual(len(starts), 1)
+        self.assertIn("その他", graph)
+        self.assertIn("1 件の合計", graph)
+        self.assertEqual(memgate.bar(1, 1000, 10).count("█"), 1)
+        self.assertEqual(memgate.bar(0, 1000, 10).count("█"), 0)
+
     def test_wsl_orphan_only_on_wsl_and_not_services(self):
         processes = {1: process(pid=1, comm="init", rss=0, ppid=0, cwd="", ws=None), 10: process()}
         self.assertEqual(self.collect(processes, wsl=False)["suspects"], [])

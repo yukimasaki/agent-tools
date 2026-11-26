@@ -21,6 +21,7 @@ or add that directory to PATH before using these examples:
 
 ```bash
 memgate status
+memgate graph
 memgate gate 2500
 memgate run --slot browser-tests --max 2 --need 2500 --wait 120 -- test-command
 memgate slots
@@ -42,6 +43,9 @@ State goes to `$XDG_STATE_HOME/memgate/`, falling back to
 same state directory. Settings are loaded at startup; restart a loop after
 changing its configuration.
 
+- `graph` draws the same snapshot as `status` as an ASCII graph: free memory
+  with the WARN and CRIT floors, swap, PSI, and usage per workspace. It reads
+  only; it never changes anything.
 - `gate <MB>` exits 0 when the projected available memory stays at or above
   `critical_mb` and memory pressure is not high. Pressure is high when PSI
   `some avg60` reaches `psi_threshold`, or when `some avg10` reaches it while

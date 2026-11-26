@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 import tomllib
+import unicodedata
 
 
 @dataclasses.dataclass
@@ -135,6 +136,13 @@ def meminfo():
                 fields = dict(item.split("=", 1) for item in line.split()[1:])
                 psi = (float(fields["avg10"]), float(fields["avg60"]))
     return data["MemAvailable"], data["MemTotal"], data["SwapTotal"] - data["SwapFree"], psi
+
+
+def swap_total_mb():
+    for line in Path("/proc/meminfo").read_text().splitlines():
+        if line.startswith("SwapTotal:"):
+            return int(line.split()[1]) // 1024
+    return 0
 
 
 def psi_pair(psi):
@@ -427,6 +435,58 @@ def report(result, cfg):
         lines.append(f"- {mb}MB {name}")
     lines += ["", "## Processes and containers to review"]
     lines += [f"- [{key}] {kind}: {desc} -> {action}" for key, kind, desc, action in result["suspects"]] or ["- None"]
+    return "\n".join(lines) + "\n"
+
+
+def bar(value, scale, width, filled="█", empty="░"):
+    """Draw value/scale as a bar of the given width; any nonzero value shows at least one cell."""
+    if scale <= 0:
+        return empty * width
+    cells = min(width, round(value / scale * width))
+    if value > 0 and cells == 0:
+        cells = 1
+    return filled * cells + empty * (width - cells)
+
+
+def cell_width(text):
+    """Terminal columns used by text; full-width and wide characters take two."""
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def pad(text, width):
+    return text + " " * max(0, width - cell_width(text))
+
+
+def render_graph(result, cfg, width=40, top=8):
+    """Return an ASCII graph: free memory against the WARN/CRIT floors, PSI, and usage per workspace."""
+    avail, total, swap = result["avail"], result["total"], result["swap"]
+    avg10, avg60 = psi_pair(result["psi"])
+    swap_total = result.get("swap_total") or 0
+    gb = lambda mb: f"{mb / 1024:.1f}GB"
+    # Mark the WARN and CRIT floors under the free-memory bar.
+    scale = max(total, 1)
+    marks = [" "] * width
+    for floor, mark in ((cfg.critical_mb, "C"), (cfg.warn_mb, "W")):
+        marks[min(width - 1, round(floor / scale * width))] = mark
+    lines = [f"レベル {result['level']}",
+             "空き  " + bar(avail, total, width) + f"  {gb(avail)} / {gb(total)}",
+             "      " + "".join(marks) + f"  W=WARN {gb(cfg.warn_mb)}  C=CRIT {gb(cfg.critical_mb)}"]
+    if swap_total:
+        lines.append("swap  " + bar(swap, swap_total, width) + f"  {gb(swap)} / {gb(swap_total)}")
+    pwidth = 20
+    lines += [f"PSI   some10 {bar(avg10, cfg.psi_threshold, pwidth)} {avg10:g}",
+              f"      some60 {bar(avg60, cfg.psi_threshold, pwidth)} {avg60:g}  （満杯が警告の {cfg.psi_threshold:g}）"]
+    usage = sorted(result["usage"].items(), key=lambda item: -item[1])
+    if usage:
+        peak = usage[0][1]
+        lines += ["", "workspace 別の使用量"]
+        label = lambda key: result["wss"].get(key, key)
+        name_width = max(cell_width(label(key)) for key, _ in usage[:top])
+        for key, mb in usage[:top]:
+            lines.append(f" {pad(label(key), name_width)}  {bar(mb, peak, 24, '█', ' ')}  {gb(mb)}")
+        rest = sum(mb for _, mb in usage[top:])
+        if rest:
+            lines.append(f" {pad('その他', name_width)}  {' ' * 24}  {gb(rest)}（{len(usage) - top} 件の合計）")
     return "\n".join(lines) + "\n"
 
 
@@ -926,6 +986,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("status")
+    commands.add_parser("graph")
     gate_parser = commands.add_parser("gate")
     gate_parser.add_argument("need_mb", type=int)
     commands.add_parser("slots")
@@ -945,6 +1006,8 @@ def main():
             return gate(args.need_mb, cfg)
         if args.command == "status":
             print(report(analyze(cfg, with_docker_stats=True), cfg), end="")
+        elif args.command == "graph":
+            print(render_graph(dict(analyze(cfg), swap_total=swap_total_mb()), cfg), end="")
         elif args.command == "slots":
             print("\n".join(slots_status()) or "No slots")
         elif args.command == "loop":
