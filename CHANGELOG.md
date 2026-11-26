@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/yukimasaki/agent-tools/compare/v0.1.9...v0.1.10) (2026-11-26)
+
+
+### Features
+
+* **memgate:** graph で空きメモリ・スワップ・PSI・workspace 別の使用量を ASCII のグラフにする ([#37](https://github.com/yukimasaki/agent-tools/issues/37)) ([63eb9c3](https://github.com/yukimasaki/agent-tools/commit/63eb9c36e0fd35b279343680800a79155bb064e5))
+
 ## [0.1.9](https://github.com/yukimasaki/agent-tools/compare/v0.1.8...v0.1.9) (2026-11-18)
 
 
